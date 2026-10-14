@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Keep the repeatable PyInstaller specification in source control.
+!Max4PumpValve.spec
+pytest-cache-files-*/
