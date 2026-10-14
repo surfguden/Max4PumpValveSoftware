@@ -17,7 +17,8 @@ New-Item -ItemType Directory -Force -Path 'build','dist' | Out-Null
 # Only local build verification opts into the otherwise disabled simulator.
 $env:PUMPVALVE_TEST_SIMULATION = '1'
 $env:PUMPVALVE_DATA_DIR = Join-Path $PSScriptRoot 'build\test user data'
-& $BuildPython tools\run_tests.py -q -p no:cacheprovider --basetemp 'build\pytest temporary files'
+$TestTemp = Join-Path 'build' ('pytest temporary files-' + [guid]::NewGuid().ToString('N'))
+& $BuildPython tools\run_tests.py -q -p no:cacheprovider --basetemp $TestTemp
 Check-Exit
 & $BuildPython -m PyInstaller --noconfirm --clean Max4PumpValve.spec
 Check-Exit
