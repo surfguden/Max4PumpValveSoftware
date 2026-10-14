@@ -1,4 +1,12 @@
-Max4 Pump & Valve 1.0.0 - portable Windows x64 distribution
+Max4 Pump & Valve 1.1.0 - portable Windows x64 distribution
+
+TERMINAL / AI AGENTS / SSH
+Max4PumpValveCtl.exe run --gui keeps a console attached to the GUI and accepts
+commands while printing events from both interfaces. Type "help" for commands.
+From another terminal: Max4PumpValveCtl.exe status, send, or watch.
+For unattended SSH: Max4PumpValveCtl.exe run --headless --no-stdin.
+Use shutdown to end the owner. See TERMINAL.md for complete examples and JSON.
+All interfaces use exactly the same application commands and device reservations.
 
 Extract the entire ZIP, then launch Max4PumpValve.exe. Keep _internal beside it.
 Requires Windows 10 version 1903 or newer, x64 (Windows 11 recommended).

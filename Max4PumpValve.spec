@@ -15,7 +15,8 @@ a.binaries = [entry for entry in a.binaries
 def needed(entry):
     name = entry[0].replace('\\', '/').lower()
     if '/plugins/' in name:
-        return name.endswith(('/platforms/qwindows.dll', '/styles/qmodernwindowsstyle.dll'))
+        return name.endswith(('/platforms/qwindows.dll', '/platforms/qoffscreen.dll',
+                              '/styles/qmodernwindowsstyle.dll'))
     if Path(name).name.startswith('qt6'):
         return Path(name).name in ('qt6core.dll', 'qt6gui.dll', 'qt6widgets.dll', 'qt6network.dll')
     return True
@@ -24,4 +25,9 @@ pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Max4PumpValve',
           debug=False, strip=False, upx=False, console=False,
           version=str(root / 'version_info.txt'))
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='Max4PumpValve-1.0.0')
+console_scripts = [entry for entry in a.scripts if entry[0] != 'main']
+console_scripts.append(('console_main', str(root / 'console_main.py'), 'PYSOURCE'))
+console = EXE(pyz, console_scripts, [], exclude_binaries=True, name='Max4PumpValveCtl',
+              debug=False, strip=False, upx=False, console=True,
+              version=str(root / 'version_info.txt'))
+coll = COLLECT(exe, console, a.binaries, a.datas, strip=False, upx=False, name='Max4PumpValve-1.1.0')

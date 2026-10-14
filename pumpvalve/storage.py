@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 
 
 def data_dir():
@@ -18,6 +18,11 @@ def load():
     if not path.exists():
         return {}
     data = json.loads(path.read_text(encoding='utf-8'))
+    validate(data)
+    return data
+
+
+def validate(data):
     if not isinstance(data, dict):
         raise ValueError('Settings must contain an object')
     for key in ('config', 'sdk', 'port'):
@@ -44,7 +49,6 @@ def load():
         syringe.validate()
         if syringe.name != name:
             raise ValueError('Saved syringe name mismatch')
-    return data
 
 
 def save(data):

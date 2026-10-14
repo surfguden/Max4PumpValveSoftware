@@ -73,6 +73,7 @@ class Application:
         self.reserved = set()
         self.helper = None
         self.cancel = Event()
+        self.reference_cancels = {i: Event() for i in range(4)}
         self.state = {'running': False, 'step': 'Idle', 'message': '', 'progress': 0}
         self.helper_states = {kind: dict(self.state) for kind in ('stir', 'inject')}
 
@@ -82,6 +83,12 @@ class Application:
             if self.state.get('kind'):
                 self.helper_states[self.state['kind']] = dict(self.state)
         logger.info('Sequence %r', values)
+        observer = getattr(self, 'observe', None)
+        if observer:
+            try:
+                observer(self.snapshot())
+            except Exception:
+                logger.exception('Sequence observer failed')
 
     def snapshot(self):
         with self.lock:
@@ -240,6 +247,8 @@ class Application:
         def command():
             state = self._ready(index)
             if mode == 'valve':
+                if finite(value, 'Valve position') not in (1, 2):
+                    raise ValueError('Valve position must be exactly 1 or 2')
                 return self.pumps.set_valve_position(index, int(value))
             if mode not in ('flow', 'volume', 'refill', 'empty', 'level'):
                 raise ValueError('Unknown pump mode')
@@ -261,7 +270,8 @@ class Application:
     def _reference(self, index):
         keys = [('pump', index)]
         self._reserve(keys)
-        self.cancel.clear()
+        cancelled = self.reference_cancels[index]
+        cancelled.clear()
         try:
             def start():
                 self._ready(index)
@@ -269,13 +279,16 @@ class Application:
             self.qmix.call(start)
             expires = time.monotonic() + 60
             while True:
-                self._check(expires)
+                if cancelled.is_set():
+                    raise Cancelled('Reference cancelled')
+                if time.monotonic() >= expires:
+                    raise TimeoutError('Reference operation deadline exceeded')
                 finished, fault = self.qmix.call(lambda: (self.pumps.reference_move_finished(index), self.pumps.read_fault(index)))
                 if fault:
                     raise RuntimeError('Reference fault')
                 if finished:
                     return
-                self.cancel.wait(0.05)
+                cancelled.wait(0.05)
         except Exception:
             self.stop_pump(index)
             raise
@@ -340,15 +353,18 @@ class Application:
         return self._manual([('serial', 0)], self.serial, move, timeout=13)
 
     def stop_pump(self, index):
-        self.cancel.set()  # Also interrupts a reference operation.
+        self.reference_cancels[index].set()
         with self.lock:
             if self.state['running'] and self.state.get('pump') == index:
+                self.cancel.set()
+                if self.state.get('kind') == 'inject' and self.valves:
+                    self.valves.cancel.set()
                 self.state['step'] = 'Stopping'
         return self.qmix.submit(lambda: self.pumps.stop(index) if self.pumps else None,
                                 priority=0, recovery=True)
 
     def start(self, kind, index, *, rate=None, refill='Full syringe', volume=0,
-              address=None, before='input', after='output', deadline=120):
+              address=None, before='input', after='output', deadline=120, command_id=None):
         keys = [('pump', index)] + ([('serial', 0)] if kind == 'inject' else [])
         if kind not in ('stir', 'inject'):
             raise ValueError('Unknown helper')
@@ -360,7 +376,7 @@ class Application:
                 raise RuntimeError('A helper is already running')
         self._reserve(keys)
         self.cancel.clear()
-        self._publish(running=True, kind=kind, pump=index, step='Validating', message='', progress=0,
+        self._publish(running=True, kind=kind, pump=index, command_id=command_id, step='Validating', message='', progress=0,
                       injected=0, remaining=0)
         def run():
             try:
@@ -466,10 +482,12 @@ class Application:
                 raise Cancelled('Sequence cancelled')
 
     def stop_helper(self):
-        self.cancel.set()
-        if self.valves:
-            self.valves.cancel.set()
         state = self.snapshot()
+        if not state['running']:
+            return None
+        self.cancel.set()
+        if self.valves and state.get('kind') == 'inject':
+            self.valves.cancel.set()
         if state.get('pump') is not None:
             return self.stop_pump(state['pump'])
 

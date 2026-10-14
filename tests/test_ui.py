@@ -2,6 +2,7 @@ import os
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from PySide6.QtWidgets import QApplication
 from pumpvalve.application import Application
+from pumpvalve.commands import Commands
 from pumpvalve.ui import MainWindow, SyringeDialog
 
 
@@ -9,7 +10,8 @@ def test_ui_disconnected_responsive(tmp_path, monkeypatch):
     monkeypatch.setenv('PUMPVALVE_DATA_DIR', str(tmp_path/'user data with spaces'))
     qt = QApplication.instance() or QApplication([])
     app = Application()
-    window = MainWindow(app)
+    commands = Commands(app)
+    window = MainWindow(commands)
     try:
         assert window.tabs.count() == 3
         assert app.pumps is None and app.valves is None
@@ -36,7 +38,7 @@ def test_ui_disconnected_responsive(tmp_path, monkeypatch):
         app.helper.join(2)
     finally:
         window.close()
-        app.shutdown()
+        commands.close()
         qt.processEvents()
     from pumpvalve.storage import load
     assert 'spaces' in load()['config']

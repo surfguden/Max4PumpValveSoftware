@@ -19,9 +19,9 @@ $env:PUMPVALVE_DATA_DIR = Join-Path $PSScriptRoot 'build\test user data'
 Check-Exit
 & $BuildPython -m PyInstaller --noconfirm --clean Max4PumpValve.spec
 Check-Exit
-$Distribution = Join-Path $PSScriptRoot 'dist\Max4PumpValve-1.0.0'
+$Distribution = Join-Path $PSScriptRoot 'dist\Max4PumpValve-1.1.0'
 Copy-Item -LiteralPath 'PORTABLE_README.txt' -Destination $Distribution
-Copy-Item -LiteralPath 'docs\SDK_RUNTIME.md','docs\SOURCE_PROVENANCE.md','docs\VERIFICATION.md' -Destination $Distribution
+Copy-Item -LiteralPath 'docs\SDK_RUNTIME.md','docs\SOURCE_PROVENANCE.md','docs\VERIFICATION.md','docs\TERMINAL.md' -Destination $Distribution
 # Retain dependency licenses beside the portable application.
 & $BuildPython tools\collect_licenses.py $Distribution
 Check-Exit
@@ -34,7 +34,10 @@ if ($process.ExitCode -ne 0) { throw "Packaged smoke test failed. See $SmokeRepo
 $result = Get-Content -Raw -LiteralPath $SmokeReport | ConvertFrom-Json
 if (-not $result.passed) { throw "Packaged smoke test failed: $($result.error)" }
 Copy-Item -LiteralPath $SmokeReport -Destination (Join-Path $Distribution 'verification.json')
-$ZipPath = Join-Path $PSScriptRoot 'dist\Max4PumpValve-1.0.0-windows-x64-portable.zip'
+& $BuildPython tools\verify_console.py $Distribution 'build\console verification\report.json'
+Check-Exit
+Copy-Item -LiteralPath 'build\console verification\report.json' -Destination (Join-Path $Distribution 'console-verification.json')
+$ZipPath = Join-Path $PSScriptRoot 'dist\Max4PumpValve-1.1.0-windows-x64-portable.zip'
 Compress-Archive -LiteralPath $Distribution -DestinationPath $ZipPath -Force
 & $BuildPython tools\source_archive.py
 Check-Exit

@@ -55,28 +55,30 @@ def smoke(qt, app, window, report_path):
                 window.config.setText(str(missing))
                 window.persist()
                 check('settings persistence with spaces', load()['config'] == str(missing))
-                window.task(lambda: app.connect_pumps(True, 2), window.set_cards)
+                window.issue('pumps.connect', dict(simulation=True, count=2), lambda r: window.set_cards(r['count']))
                 stage = 1
             elif stage == 1 and app.pumps and len(window.cards) == 2 and window.cards[0].isEnabled():
-                window.task(lambda: app.connect_valves(True), window.show_valves)
+                window.issue('valves.connect', dict(simulation=True), window.show_valves)
                 stage = 2
             elif stage == 2 and window.inject_valve.count() == 2:
                 check('simulation pump and valve connections', app.pumps.unit_count == 2)
-                window.task(lambda: app.map_valve(0, 2, 1))
+                window.issue('pump.map', dict(pump=1, energized=2, deenergized=1))
                 stage = 3
             elif stage == 3 and 0 in app.mapping:
+                if window.stir_pump.currentIndex() < 0:
+                    raise AssertionError('Connected pump missing from helper selection')
                 window.stir_rate.setValue(5000)
                 window.speed.setCurrentIndex(1)
                 window.start_stir()
                 stage = 4
-            elif stage == 4 and not app.snapshot()['running']:
+            elif stage == 4 and app.snapshot().get('kind') == 'stir' and not app.snapshot()['running']:
                 check('stirring completes', app.snapshot()['step'] == 'Completed')
                 window.inject_rate.setValue(5000)
                 window.inject_volume.setValue(0.1)
                 window.after.setCurrentIndex(1)
                 window.start_inject()
                 stage = 5
-            elif stage == 5 and not app.snapshot()['running']:
+            elif stage == 5 and app.snapshot().get('kind') == 'inject' and not app.snapshot()['running']:
                 state = app.snapshot()
                 check('injection completes', state['step'] == 'Completed')
                 check('injection progress readback', state['progress'] == 100 and abs(state['injected']-0.1) < 0.001)
@@ -84,10 +86,6 @@ def smoke(qt, app, window, report_path):
                 window.poll()
                 window.grab().save(str(path.parent / 'helpers-completed.png'))
                 def diagnostics():
-                    try:
-                        app.connect_pumps(False, configuration=str(path.parent/'missing'))
-                    except Exception:
-                        pass  # Existing simulation connection must be disconnected first.
                     old = os.environ.get('QMIXSDK')
                     try:
                         os.environ['QMIXSDK'] = str(path.parent / 'missing SDK with spaces')
@@ -101,13 +99,14 @@ def smoke(qt, app, window, report_path):
                             os.environ.pop('QMIXSDK', None)
                         else:
                             os.environ['QMIXSDK'] = old
-                    app.disconnect_pumps()
-                    try:
-                        app.connect_pumps(False, configuration=str(path.parent/'missing XML with spaces'))
-                    except ValueError as exc:
-                        report['configuration_error'] = str(exc)
-                    else:
+                    disconnected = window.commands.execute('pumps.disconnect', source='gui')
+                    if not disconnected['ok']:
+                        raise RuntimeError(disconnected['error'])
+                    result = window.commands.execute('pumps.connect', dict(simulation=False,
+                        configuration=str(path.parent/'missing XML with spaces')), source='gui')
+                    if result['ok']:
                         raise AssertionError('Missing configuration error')
+                    report['configuration_error'] = result['error']
                 window.task(diagnostics, lambda _: report.update(diagnostics=True))
                 stage = 6
             elif stage == 6 and report.get('diagnostics'):

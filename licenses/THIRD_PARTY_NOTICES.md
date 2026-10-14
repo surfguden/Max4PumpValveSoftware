@@ -3,7 +3,8 @@
 This distribution includes Python 3.12.14, pySerial 3.5, and dynamically linked
 PySide6/Shiboken/Qt 6.11.1. Original wheel license notices are retained alongside
 the Python, BSD and GNU LGPLv3/GPLv3 texts. Only Qt Core, GUI, Widgets and Network
-runtime libraries and the Windows platform/style plugins are included.
+runtime libraries and the Windows/offscreen platform and Windows style plugins
+are included. Offscreen rendering is used only for automated GUI verification.
 
 Qt for Python is offered under LGPLv3/GPLv3 and commercial terms:
 https://doc.qt.io/qtforpython-6/

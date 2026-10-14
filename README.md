@@ -6,7 +6,19 @@ in `pumpvalve/application.py`; the UI only gathers inputs and displays results.
 Qmix and serial traffic have separate serialized owners. Simulation never opens
 either physical bus.
 
-Download/extract `dist/Max4PumpValve-1.0.0-windows-x64-portable.zip` and launch the
+Version 1.1 adds one shared command dispatcher for GUI and terminal, an attached
+console with a simultaneous GUI, a headless owner, authenticated local clients,
+and live/replayable JSON-line events. See `docs/TERMINAL.md` for PowerShell/SSH
+examples, command schemas and hardware authorization.
+
+```powershell
+./Max4PumpValveCtl.exe run --gui
+# In another terminal while that owner runs:
+./Max4PumpValveCtl.exe status
+./Max4PumpValveCtl.exe watch
+```
+
+Download/extract `dist/Max4PumpValve-1.1.0-windows-x64-portable.zip` and launch the
 executable. See `PORTABLE_README.txt` for operation and runtime setup.
 
 ## Source and repeatable Windows build

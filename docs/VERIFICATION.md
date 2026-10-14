@@ -6,7 +6,7 @@ No physical Qmix or serial connection was opened.
 
 ## Automated acceptance
 
-88 tests passed, with 18 additional unittest subtests. Tests cover:
+111 tests passed, with 18 additional unittest subtests. Tests cover:
 
 - All three refill targets with both maximum-speed and defined-rate Stirring.
 - All 16 four-port and all 9 three-port Before/After injection combinations.
@@ -24,6 +24,12 @@ No physical Qmix or serial connection was opened.
 - Reused serial driver's fake transport: framing, errors, baud/flow-control setup,
   identification, scanning, missing saved devices, profile support, verified
   moves, transport cancellation and serial failures. No COM port is opened.
+- Shared GUI/CLI dispatcher, external process clients, authenticated loopback
+  requests, rejected second owners, request-ID retry suppression, event replay,
+  session cursors/gaps, malformed requests, settings/syringe commands, GUI
+  reflection of remote connections/names, and Stop bypassing busy GUI requests.
+  Stopping an unrelated pump does not cancel another pump's helper.
+  Helper Stop leaves unrelated manual flow and the Stirring-independent serial bus alone.
 
 Repeatable command:
 
@@ -42,9 +48,15 @@ The Qmix Python wrapper's packaged location is checked explicitly.
 The ZIP includes the machine-readable result as `verification.json`.
 Screenshots under `build/packaged smoke results` were visually inspected.
 
+`tools/verify_console.py` exercises the actual console executable as a headless
+owner and as an owner with a simultaneous GUI, with separate executable clients,
+same-terminal stdin requests, event echo/replay, reservations, cancellation,
+successful Stirring and Injection, final readback and clean shutdown. Results
+are included as `console-verification.json`. All connections are simulated.
+
 `tools/test_extracted.ps1` additionally extracts the delivered ZIP into a path
 with spaces, marks distribution files read-only, removes Python directories from
-PATH/PYTHONPATH/PYTHONHOME, and repeats the executable smoke check using an external
+PATH/PYTHONPATH/PYTHONHOME, and repeats the GUI and console smoke checks using an external
 user-data folder. This passes. It does not uninstall Python or create a clean OS.
 
 A build-host Poppler ICU DLL initially caused a Qt import failure. The final

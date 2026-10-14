@@ -1,8 +1,6 @@
 import argparse
-import sys
 import traceback
 from pumpvalve.logging_support import configure, logger
-from pumpvalve.application import Application
 from pumpvalve.storage import VERSION, data_dir
 
 
@@ -13,20 +11,8 @@ def main():
     args = parser.parse_args()
     if args.version:
         return 0
-    configure()
-    from PySide6.QtWidgets import QApplication
-    from pumpvalve.ui import MainWindow
-    qt = QApplication(sys.argv[:1])
-    app = Application()
-    window = MainWindow(app)
-    window.show()
-    if args.smoke_test:
-        from pumpvalve.smoke import smoke
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(100, lambda: smoke(qt, app, window, args.smoke_test))
-    code = qt.exec()
-    app.shutdown()
-    return code
+    from pumpvalve.runtime import run
+    return run(gui=True, smoke_report=args.smoke_test)
 
 
 if __name__ == '__main__':
