@@ -47,6 +47,7 @@ def parser():
         bus_sub = sub.add_parser(bus).add_subparsers(dest='operation', required=True)
         connect = bus_sub.add_parser('connect')
         connect.add_argument('--hardware', action='store_true', help='Explicit real-hardware connection')
+        connect.add_argument('--simulate', action='store_true', help=argparse.SUPPRESS)
         if bus == 'pumps':
             connect.add_argument('--count', type=int, default=2)
             connect.add_argument('--configuration', default='')
@@ -99,7 +100,14 @@ def envelope(namespace):
         return 'pump.command', dict(mode=operation, **args), None
     if action in ('pumps', 'valves'):
         if operation == 'connect':
-            args['simulation'] = not args.pop('hardware')
+            hardware, simulate = args.pop('hardware'), args.pop('simulate')
+            if hardware and simulate:
+                raise ValueError('Choose hardware or test simulation')
+            args['simulation'] = simulate
+            # Empty CLI path options use the owner's saved/default paths.
+            for field in ('configuration', 'sdk', 'port'):
+                if not args.get(field):
+                    args.pop(field, None)
         return action+'.'+operation, args, None
     if action == 'helper':
         return ('helper.stop', {}, None) if operation == 'stop' else ('helper.start', dict(kind=operation, **args), None)

@@ -13,14 +13,16 @@ Requires Windows 10 version 1903 or newer, x64 (Windows 11 recommended).
 Python, pip and a source checkout are not required. The application always starts
 disconnected. It never restores motion or automatically connects saved devices.
 
-SIMULATION
-Simulation is selected by default on both device tabs. Click Connect pumps and
-Connect & Scan. Simulated time is accelerated 30x. The helper tab operates on these
-devices with visible fill-level progress. Map each pump's energized/de-energized
-built-in valve positions explicitly before Stirring Cycle is enabled.
+HARDWARE DEFAULTS
+Simulation controls are disabled and hidden in normal operation. Both GUI and
+terminal connections use hardware. Offline build tests explicitly enable the
+internal test simulator; this is not a saved setting or normal operating mode.
+Default configuration: C:\Users\Public\Documents\QmixElements\Projects\default_project\Configurations\dual
+Default SDK: %LOCALAPPDATA%\CETONI_SDK (resolved for the current Windows user).
+Default serial valve connection: COM3, 9600 baud.
 
 REAL DEVICES
-Uncheck Simulation only when hardware operation is intended. Select an existing
+Connect only when hardware operation is intended. Select an existing
 Qmix Elements folder containing XML files. Keep this folder external to the ZIP.
 Install the vendor CETONI SDK x64 runtime separately and browse to its runtime
 folder, or set QMIXSDK to that folder before launch. See SDK_RUNTIME.md.
@@ -58,8 +60,11 @@ call quarantines that bus; a stop is queued with priority, but remains unverifie
 until the call returns. Resolve hardware state before restarting the application.
 
 SETTINGS AND LOGS
-Save Settings / Save Configuration remembers configuration/runtime paths and COM
-settings and valve names. Data and rotating logs are written to
+Save all settings remembers connection paths, COM settings, valve names, syringe
+profiles and pump assignments, pump mode/volume/flow/level and valve mappings,
+helper selections/parameters/deadline, pump count, selected tab and window size.
+Load settings restores those saved controls without connecting or moving devices.
+Profiles must still be applied explicitly after connecting. Data and logs go to
 %LOCALAPPDATA%\Max4PumpValve, never to the extracted distribution.
 PUMPVALVE_DATA_DIR can override this location for controlled testing.
 

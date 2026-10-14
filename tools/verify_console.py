@@ -19,10 +19,12 @@ def verify(distribution, report_path):
             raise AssertionError(name)
         report['checks'].append(name)
     try:
-        for gui in (False, True):
-            tag = 'attached-gui' if gui else 'headless'
+        for gui, simulation in ((False, True), (True, True), (False, False)):
+            tag = ('attached-gui' if gui else 'headless') if simulation else 'hardware-defaults'
             folder = report_path.parent / (tag+' user data with spaces')
             env = dict(os.environ, PUMPVALVE_DATA_DIR=str(folder), QT_QPA_PLATFORM='offscreen')
+            if not simulation:
+                env.pop('PUMPVALVE_TEST_SIMULATION', None)
             argv = [str(exe), 'run', '--gui' if gui else '--headless']
             if not gui:
                 argv.append('--no-stdin')
@@ -59,14 +61,23 @@ def verify(distribution, report_path):
                         return False
                 until(ready)
                 check(tag+': disconnected startup', cli('status')['result']['pump_count'] == 0)
+                if not simulation:
+                    for device in ('pumps', 'valves'):
+                        response = cli(device, 'connect', '--simulate', ok=False)
+                        check(tag+': '+device+' simulation rejected', 'simulation' in json.dumps(response).lower())
+                    check(tag+': no simulated pumps connected', cli('status')['result']['pump_count'] == 0)
+                    cli('shutdown')
+                    process.wait(12)
+                    check(tag+': clean owner exit', process.returncode == 0)
+                    continue
                 if gui:
                     process.stdin.write('{"id":"stdin-connect","command":"pumps.connect","args":{"simulation":true}}\n')
                     process.stdin.flush()
                     until(lambda: cli('status')['result']['pump_count'] == 2)
                     check(tag+': same-terminal stdin command')
                 else:
-                    cli('pumps', 'connect')
-                cli('valves', 'connect')
+                    cli('pumps', 'connect', '--simulate')
+                cli('valves', 'connect', '--simulate')
                 cli('pump', 'map', '--pump', '1', '--energized', '2', '--deenergized', '1')
                 cli('helper', 'stir', '--pump', '1', '--rate', '100')
                 cli('pump', 'empty', '--pump', '1', '--rate', '100', ok=False)

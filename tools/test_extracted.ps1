@@ -12,7 +12,9 @@ $SavedPath = $env:PATH
 $SavedPythonPath = $env:PYTHONPATH
 $SavedPythonHome = $env:PYTHONHOME
 $SavedData = $env:PUMPVALVE_DATA_DIR
+$SavedSimulation = $env:PUMPVALVE_TEST_SIMULATION
 try {
+    $env:PUMPVALVE_TEST_SIMULATION = '1'
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
     $env:PYTHONPATH = ''
     $env:PYTHONHOME = ''
@@ -32,4 +34,5 @@ try {
     $env:PYTHONPATH = $SavedPythonPath
     $env:PYTHONHOME = $SavedPythonHome
     $env:PUMPVALVE_DATA_DIR = $SavedData
+    $env:PUMPVALVE_TEST_SIMULATION = $SavedSimulation
 }

@@ -14,8 +14,10 @@ if (-not $SkipDependencyInstall) {
     Check-Exit
 }
 New-Item -ItemType Directory -Force -Path 'build','dist' | Out-Null
+# Only local build verification opts into the otherwise disabled simulator.
+$env:PUMPVALVE_TEST_SIMULATION = '1'
 $env:PUMPVALVE_DATA_DIR = Join-Path $PSScriptRoot 'build\test user data'
-& $BuildPython -m pytest -q -p no:cacheprovider --basetemp 'build\pytest temporary files'
+& $BuildPython tools\run_tests.py -q -p no:cacheprovider --basetemp 'build\pytest temporary files'
 Check-Exit
 & $BuildPython -m PyInstaller --noconfirm --clean Max4PumpValve.spec
 Check-Exit

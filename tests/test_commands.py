@@ -20,6 +20,8 @@ def service(tmp_path, monkeypatch):
 
 
 def succeed(command, args=None, rid=None):
+    if command in ('pumps.connect', 'valves.connect') and args is None:
+        args = {'simulation': True}
     result = request(command, args, rid)
     assert result['ok'], result
     return result['result']
@@ -135,7 +137,8 @@ def test_cli_translates_to_canonical_commands():
     p = parser()
     command, args, _ = envelope(p.parse_args(['pump','level','--pump','1','--value','0.5','--rate','100']))
     assert command == 'pump.command' and args == dict(pump=1, mode='level', value=0.5, rate=100)
-    assert envelope(p.parse_args(['pumps','connect']))[1]['simulation'] is True
+    assert envelope(p.parse_args(['pumps','connect']))[1]['simulation'] is False
+    assert envelope(p.parse_args(['pumps','connect','--simulate']))[1]['simulation'] is True
     assert envelope(p.parse_args(['pumps','connect','--hardware','--configuration','C:/config folder']))[1]['simulation'] is False
 
 

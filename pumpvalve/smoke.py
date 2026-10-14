@@ -40,7 +40,7 @@ def smoke(qt, app, window, report_path):
             if stage == 0:
                 check('disconnected startup', app.pumps is None and app.valves is None)
                 check('all three tabs', window.tabs.count() == 3)
-                check('simulation defaults', window.pump_sim.isChecked() and window.valve_sim.isChecked())
+                check('hardware defaults', not window.pump_sim.isChecked() and not window.valve_sim.isChecked())
                 check('Qmix Python wrapper bundled', (CetoniPump().sdk_python_path / 'qmixsdk' / 'qmixpump.py').is_file())
                 for i in range(3):
                     window.tabs.setCurrentIndex(i)

@@ -186,7 +186,7 @@ class Commands:
             return dict(commands=['status', 'ports', 'pumps.connect', 'pumps.disconnect', 'pump.command',
                 'pump.stop', 'pump.syringe', 'pump.map', 'valves.connect', 'valves.scan',
                 'valves.disconnect', 'valve.query', 'valve.move', 'helper.start', 'helper.stop',
-                'settings.save', 'events', 'shutdown'], pump_numbers='1–4', valve_addresses='physical switch 0–14',
+                'settings.save', 'settings.load', 'events', 'shutdown'], pump_numbers='1–4', valve_addresses='physical switch 0–14',
                 units=dict(volume='mL', rate='µL/min'))
         if command == 'status':
             if args:
@@ -199,11 +199,13 @@ class Commands:
             return [p.device for p in comports()]
         if command == 'pumps.connect':
             args = dict(args)
-            simulation = args.pop('simulation', True)
+            simulation = args.pop('simulation', False)
             if type(simulation) is not bool:
                 raise ValueError('simulation must be true or false')
             if type(args.get('count', 2)) is not int or not 1 <= args.get('count', 2) <= 4:
                 raise ValueError('count must be an integer from 1 to 4')
+            args.setdefault('configuration', self.settings.get('config', ''))
+            args.setdefault('sdk', self.settings.get('sdk', ''))
             count = a.connect_pumps(simulation, **args)
             return {'count': count, 'simulation': simulation}
         if command == 'pumps.disconnect':
@@ -227,6 +229,7 @@ class Commands:
                 result = a.configure_syringe(index, profile)
                 with self.lock:
                     self.settings.setdefault('syringes', {})[profile.name] = asdict(profile)
+                    self.settings.setdefault('pump_profiles', {})[str(pump)] = profile.name
                     save(self.settings)
                 return result
             if command == 'pump.stop':
@@ -239,9 +242,11 @@ class Commands:
                 return {'stopped': True, 'verified': True, 'state': state}
         if command == 'valves.connect':
             args = dict(args)
-            simulation = args.pop('simulation', True)
+            simulation = args.pop('simulation', False)
             if type(simulation) is not bool:
                 raise ValueError('simulation must be true or false')
+            args.setdefault('port', self.settings.get('port', 'COM3'))
+            args.setdefault('baud', self.settings.get('baud', 9600))
             return a.connect_valves(simulation, **args)
         if command in ('valves.scan', 'valves.disconnect', 'helper.stop'):
             if args:
@@ -269,6 +274,17 @@ class Commands:
             with self.starts:
                 a.start(index=pump-1, command_id=request_id, **args)
             return {'started': True, 'completion': 'Observe helper.state events', 'command_id': request_id}
+        if command == 'settings.load':
+            if args:
+                raise ValueError('settings.load accepts no arguments')
+            loaded = load()
+            with self.lock:
+                self.settings = loaded
+            if not self.app.valves:
+                from .drivers.valve_session import DetectedUnit
+                self.app.units = {v['address']: DetectedUnit(v['address'], error='Disconnected; position unverified')
+                                  for v in loaded.get('valves', [])}
+            return loaded
         if command == 'settings.save':
             with self.lock:
                 updated = {**self.settings, **args}

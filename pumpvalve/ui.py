@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QTabWidget, QVBoxLayout,
     QDialogButtonBox, QProgressBar, QCheckBox)
 from .application import Syringe
 from .drivers.valve_session import VALVE_TYPES, DetectedUnit
-from .storage import VERSION
+from .storage import VERSION, test_simulation_enabled
 from .drivers.cetoni import SYRINGE_PRESETS
 
 
@@ -258,6 +258,9 @@ class PumpCard(QGroupBox):
 
     def configure(self):
         dialog = SyringeDialog(self.window.settings.get('syringes', {}), self)
+        selected = self.window.settings.get('pump_profiles', {}).get(str(self.index+1))
+        if selected:
+            dialog.profiles.setCurrentText(selected)
         if dialog.exec() == QDialog.Accepted:
             profile = dialog.profile
             def done(result):
@@ -298,9 +301,14 @@ class MainWindow(QMainWindow):
         title = QLabel('MAX4  /  PUMP & VALVE CONTROL')
         title.setStyleSheet('font-size:20px; font-weight:600; padding:8px;')
         layout.addWidget(title)
+        settings_row = QHBoxLayout()
+        self.save_settings_button = button('Save all settings', self.persist, settings_row)
+        self.load_settings_button = button('Load settings', self.load_settings, settings_row)
+        settings_row.addStretch()
+        layout.addLayout(settings_row)
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
-        self.message = QLabel('Disconnected · Select Simulation or explicitly connect devices.')
+        self.message = QLabel('Disconnected · Hardware mode. Connect devices explicitly.')
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
         self.setCentralWidget(root)
@@ -313,6 +321,8 @@ class MainWindow(QMainWindow):
         self.build_pumps()
         self.build_valves()
         self.build_helpers()
+        self.restore_controls()
+        self.last_connection_mode = None
         self.setStyleSheet('''QMainWindow,QWidget { background:#202a31; color:#e3edf2; }
           QGroupBox { border:1px solid #4a606c; border-radius:5px; margin-top:14px; padding:10px; }
           QGroupBox::title { subcontrol-origin:margin; left:12px; }
@@ -357,14 +367,102 @@ class MainWindow(QMainWindow):
         self.issue('pump.stop', dict(pump=index+1), lambda _: self.message.setText(f'Pump {index+1}: stopped (readback verified)'))
 
     def persist(self):
-        self.settings.update(config=self.config.text(), sdk=self.sdk.text(), port=self.port.currentText(), baud=int(self.baud.currentText()))
-        self.settings['valves'] = [{'address': a, 'name': self.names.get(a, f'Valve {a:X}')} for a in self.app.units]
+        # Start with the latest dispatcher settings so a recently applied syringe
+        # is retained even if the monitor has not refreshed the window yet.
+        saved = json_copy(self.commands.settings)
+        self.capture_pump_controls()
+        saved.update(config=self.config.text(), sdk=self.sdk.text(), port=self.port.currentText(), baud=int(self.baud.currentText()))
+        saved['valves'] = [{'address': a, 'name': self.names.get(a, f'Valve {a:X}')}
+                           for a in sorted(set(self.names) | set(self.app.units))]
+        ui = json_copy(self.settings.get('ui', {}))
+        previous = ui.get('helpers', {})
+        ui.update(count=self.count.value(), tab=self.tabs.currentIndex(),
+                  window_size=[self.width(), self.height()], helpers=dict(
+            stir_pump=self.stir_pump.currentIndex() if self.stir_pump.currentIndex() >= 0 else previous.get('stir_pump', 0), speed=self.speed.currentText(),
+            stir_rate=self.stir_rate.value(), refill=self.refill.currentText(),
+            refill_volume=self.refill_volume.value(), inject_pump=self.inject_pump.currentIndex() if self.inject_pump.currentIndex() >= 0 else previous.get('inject_pump', 0),
+            inject_valve=self.inject_valve.currentData() if self.inject_valve.currentData() is not None else previous.get('inject_valve'), inject_volume=self.inject_volume.value(),
+            inject_rate=self.inject_rate.value(), before=self.before.currentData() or previous.get('before'),
+            after=self.after.currentData() or previous.get('after'), deadline=self.deadline.value()))
+        saved['ui'] = ui
         try:
-            response = self.commands.execute('settings.save', json_copy(self.settings), source='gui')
+            response = self.commands.execute('settings.save', saved, source='gui')
             if not response['ok']:
                 raise ValueError(response['error'])
+            self.settings = json_copy(response['result'])
+            self.last_settings = json_copy(self.settings)
+            self.message.setText('All settings saved')
         except Exception as exc:
             self.message.setText(f'Settings save failed: {exc}')
+
+    def capture_pump_controls(self):
+        pumps = self.settings.setdefault('ui', {}).setdefault('pumps', {})
+        for card in self.cards:
+            pumps[str(card.index+1)] = dict(mode=card.mode.currentText(), volume=card.volume.value(),
+                flow=card.flow.value(), level=card.level.value(), energized=card.energized.currentIndex(),
+                deenergized=card.deenergized.currentIndex())
+
+    def restore_pump_controls(self):
+        pumps = self.settings.get('ui', {}).get('pumps', {})
+        for card in self.cards:
+            values = pumps.get(str(card.index+1), {})
+            card.mode.setCurrentText(values.get('mode', 'Volume'))
+            for key, control in [('volume', card.volume), ('flow', card.flow), ('level', card.level)]:
+                if key in values:
+                    control.setValue(values[key])
+            for key, control in [('energized', card.energized), ('deenergized', card.deenergized)]:
+                control.setCurrentIndex(values.get(key, 0))
+
+    def restore_controls(self):
+        ui = self.settings.get('ui', {})
+        self.config.setText(self.settings.get('config', ''))
+        self.sdk.setText(self.settings.get('sdk', ''))
+        self.port.setCurrentText(self.settings.get('port', 'COM3'))
+        self.baud.setCurrentText(str(self.settings.get('baud', 9600)))
+        self.names = {v['address']: v['name'] for v in self.settings.get('valves', [])}
+        self.count.setValue(ui.get('count', 2))
+        if not self.app.pumps and len(self.cards) != self.count.value():
+            self.set_cards(self.count.value(), capture=False)
+        self.restore_pump_controls()
+        helpers = ui.get('helpers', {})
+        for key, control in [('speed', self.speed), ('refill', self.refill)]:
+            if key in helpers:
+                control.setCurrentText(helpers[key])
+        for key, control in [('stir_rate', self.stir_rate), ('refill_volume', self.refill_volume),
+                             ('inject_volume', self.inject_volume), ('inject_rate', self.inject_rate),
+                             ('deadline', self.deadline)]:
+            if key in helpers:
+                control.setValue(helpers[key])
+        for key, control in [('stir_pump', self.stir_pump), ('inject_pump', self.inject_pump)]:
+            control.setCurrentIndex(min(helpers.get(key, 0), control.count()-1))
+        self.restore_valve_choices()
+        if 'window_size' in ui:
+            self.resize(*ui['window_size'])
+        self.tabs.setCurrentIndex(ui.get('tab', 0))
+        self.pump_sim.setChecked(False)
+        self.valve_sim.setChecked(False)
+
+    def restore_valve_choices(self):
+        helpers = self.settings.get('ui', {}).get('helpers', {})
+        address = helpers.get('inject_valve')
+        index = self.inject_valve.findData(address)
+        if index >= 0:
+            self.inject_valve.setCurrentIndex(index)
+        for key, control in [('before', self.before), ('after', self.after)]:
+            index = control.findData(helpers.get(key))
+            if index >= 0:
+                control.setCurrentIndex(index)
+
+    def load_settings(self):
+        response = self.commands.execute('settings.load', source='gui')
+        if not response['ok']:
+            self.message.setText(f'Settings load failed: {response["error"]}')
+            return
+        self.settings = json_copy(response['result'])
+        self.last_settings = json_copy(self.settings)
+        self.restore_controls()
+        self.last_units = None
+        self.message.setText('All settings loaded · No device commands were sent')
 
     def browse(self, target):
         path = QFileDialog.getExistingDirectory(self, 'Select folder', target.text())
@@ -376,10 +474,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(tab)
         form = QFormLayout()
         self.pump_sim = QCheckBox('Simulation (no hardware)')
-        self.pump_sim.setChecked(True)
+        self.pump_sim.setChecked(False)
+        self.pump_sim.setVisible(test_simulation_enabled())
+        self.pump_sim.setEnabled(test_simulation_enabled())
         self.count = QSpinBox()
         self.count.setRange(1, 4)
-        self.count.setValue(2)
+        self.count.setValue(self.settings.get('ui', {}).get('count', 2))
         self.config = QLineEdit(self.settings.get('config', ''))
         self.sdk = QLineEdit(self.settings.get('sdk', ''))
         for label, target in [('Qmix Elements XML folder', self.config), ('Vendor SDK runtime folder', self.sdk)]:
@@ -402,9 +502,11 @@ class MainWindow(QMainWindow):
         scroll.setWidget(content)
         layout.addWidget(scroll)
         self.tabs.addTab(tab, 'Cetoni Pumps')
-        self.set_cards(2)
+        self.set_cards(self.count.value())
 
-    def set_cards(self, count):
+    def set_cards(self, count, capture=True):
+        if capture:
+            self.capture_pump_controls()
         for card in self.cards:
             self.pump_layout.removeWidget(card)
             card.deleteLater()
@@ -413,10 +515,13 @@ class MainWindow(QMainWindow):
             self.pump_layout.addWidget(card)
             card.setEnabled(bool(self.app.pumps))
         if hasattr(self, 'stir_pump'):
-            for c in (self.stir_pump, self.inject_pump):
+            for key, c in (('stir_pump', self.stir_pump), ('inject_pump', self.inject_pump)):
                 c.clear()
                 for i in range(count):
                     c.addItem(f'Pump {i+1}', i)
+                selected = self.settings.get('ui', {}).get('helpers', {}).get(key, 0)
+                c.setCurrentIndex(min(selected, count-1))
+        self.restore_pump_controls()
 
     def connect_pumps(self):
         simulation, count, config, sdk = self.pump_sim.isChecked(), self.count.value(), self.config.text(), self.sdk.text()
@@ -432,7 +537,9 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(tab)
         row = QHBoxLayout()
         self.valve_sim = QCheckBox('Simulation (no hardware)')
-        self.valve_sim.setChecked(True)
+        self.valve_sim.setChecked(False)
+        self.valve_sim.setVisible(test_simulation_enabled())
+        self.valve_sim.setEnabled(test_simulation_enabled())
         row.addWidget(self.valve_sim)
         self.port = QComboBox()
         self.port.setEditable(True)
@@ -509,6 +616,7 @@ class MainWindow(QMainWindow):
                     self.inject_valve.addItem(self.names.get(unit.address, str(unit.address)), unit.address)
             self.inject_valve.setCurrentIndex(max(0, self.inject_valve.findData(old)))
             self.valve_choices()
+            self.restore_valve_choices()
 
     def build_helpers(self):
         tab = QWidget()
@@ -603,8 +711,15 @@ class MainWindow(QMainWindow):
             self.pump_sim.setChecked(cached.get('pump_simulation', False))
         if cached.get('valve_connected'):
             self.valve_sim.setChecked(cached.get('valve_simulation', False))
-        self.pump_sim.setEnabled(not cached.get('pump_connected'))
-        self.valve_sim.setEnabled(not cached.get('valve_connected'))
+        self.pump_sim.setEnabled(test_simulation_enabled() and not cached.get('pump_connected'))
+        self.valve_sim.setEnabled(test_simulation_enabled() and not cached.get('valve_connected'))
+        connection_mode = tuple(cached.get(k, False) for k in
+            ('pump_connected', 'pump_simulation', 'valve_connected', 'valve_simulation'))
+        if connection_mode != self.last_connection_mode:
+            self.last_connection_mode = connection_mode
+            def mode(connected, simulated):
+                return ('Test simulation' if simulated else 'Hardware') if connected else 'Disconnected'
+            self.message.setText(f'Pumps: {mode(*connection_mode[:2])} · Valves: {mode(*connection_mode[2:])}')
         # The monitor may lag a just-completed connect/disconnect callback.
         # Device-count metadata is in memory; do not replace a fresh UI selection
         # with an older cached disconnected snapshot.
@@ -619,9 +734,13 @@ class MainWindow(QMainWindow):
                 card.last_mapping = mapping
                 card.energized.setCurrentIndex(mapping[0])
                 card.deenergized.setCurrentIndex(mapping[1])
-        if cached.get('settings') and cached['settings'] != self.last_settings:
-            self.last_settings = json_copy(cached['settings'])
-            self.settings = json_copy(cached['settings'])
+        # Settings writes are synchronous; the device monitor can still hold an
+        # older snapshot. Never overwrite freshly saved controls from that cache.
+        with self.commands.lock:
+            saved_settings = json_copy(self.commands.settings)
+        if saved_settings != self.last_settings:
+            self.last_settings = json_copy(saved_settings)
+            self.settings = saved_settings
             for key, control in [('config', self.config), ('sdk', self.sdk)]:
                 control.setText(self.settings.get(key, ''))
             self.port.setCurrentText(self.settings.get('port', ''))

@@ -9,6 +9,7 @@ from .simulation import MovingPumpBank, SimulatedValves
 from .drivers.bank import CetoniPumpBank
 from .drivers.valve_session import ValveSession, VALVE_TYPES, DetectedUnit
 from .logging_support import logger
+from .storage import test_simulation_enabled
 
 
 class Cancelled(RuntimeError):
@@ -109,6 +110,8 @@ class Application:
             self.reserved.difference_update(keys)
 
     def connect_pumps(self, simulation, count=2, configuration='', sdk=''):
+        if simulation and not test_simulation_enabled():
+            raise ValueError('Simulation is disabled in normal operation')
         keys = [('pump', i) for i in range(4)]
         self._reserve(keys)
         self.pump_connecting.set()
@@ -155,6 +158,8 @@ class Application:
             self._release(keys)
 
     def connect_valves(self, simulation, port='', baud=9600):
+        if simulation and not test_simulation_enabled():
+            raise ValueError('Simulation is disabled in normal operation')
         self._reserve([('serial', 0)])
         try:
             def connect():

@@ -4,7 +4,11 @@ PySide6 controller for one to four CETONI pumps and TriContinent serial valves.
 Always starts disconnected. Hardware actions and helper sequences are implemented
 in `pumpvalve/application.py`; the UI only gathers inputs and displays results.
 Qmix and serial traffic have separate serialized owners. Simulation never opens
-either physical bus.
+either physical bus. Simulation is disabled in normal operation; only local
+offline tests opt into it. Connections default to hardware, with the public
+Qmix Elements dual configuration, %LOCALAPPDATA%/CETONI_SDK, and COM3/9600 baud.
+Save all settings / Load settings persist and restore the complete control setup
+without automatically connecting devices, applying syringe profiles or moving them.
 
 Version 1.1 adds one shared command dispatcher for GUI and terminal, an attached
 console with a simultaneous GUI, a headless owner, authenticated local clients,
@@ -35,7 +39,7 @@ retains license notices, and writes the versioned ZIP and SHA256. A complete sou
 checkout is only required for rebuilding. Source launch: `.venv/Scripts/python.exe main.py`.
 
 For an existing prepared build environment: `./build_portable.ps1 -SkipDependencyInstall`.
-Tests: `.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider --basetemp build/test-temp`.
+Tests: `.venv/Scripts/python.exe tools/run_tests.py -q -p no:cacheprovider --basetemp build/test-temp`.
 
 Syringe setup follows CETONI Elements manual sections 7.9 and 7.11. Maximum pressure
 is profile metadata, not an active pressure monitor. SDK runtime redistribution

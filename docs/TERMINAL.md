@@ -3,6 +3,11 @@
 Extract the portable ZIP. It contains Max4PumpValve.exe (GUI) and
 Max4PumpValveCtl.exe (console/client), sharing the same bundled runtime.
 Neither executable needs Python installed.
+Connections default to real hardware, using saved paths and COM settings when
+arguments are omitted. Simulation is disabled during normal operation. The GUI's
+Save all settings and Load settings cover connection settings, profiles, pump
+controls and mappings, helper controls, and layout. Loading settings does not
+connect or move devices; syringe profiles must be applied explicitly.
 
 ## Same terminal, GUI open
 
@@ -115,8 +120,9 @@ physical switch integers 0–14, not DT wire addresses. Volumes are mL; rates ar
 {"command":"pump.syringe","args":{"pump":1,"profile":{"name":"Custom","material":"Glass","inner_diameter_mm":4.78,"max_piston_stroke_mm":55,"minimum_ml":0,"maximum_ml":0.98,"max_pressure_bar":1}}}
 ```
 
-`settings.save` accepts config/sdk/port/baud/valves/syringes using the documented
+`settings.save` accepts config/sdk/port/baud/valves/syringes/pump_profiles/ui using the
 settings schema. Syringe commands save the profile after a successful application.
+`settings.load` accepts no arguments and reloads the saved settings file.
 No saved profile or configuration triggers automatic connection or motion.
 
 ## Hardware authorization

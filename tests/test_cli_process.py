@@ -24,7 +24,7 @@ def test_headless_process_clients_and_events(tmp_path, monkeypatch):
         while not (directory/'endpoint.json').exists() and time.monotonic() < deadline:
             time.sleep(0.02)
         assert cli('status')['result']['pump_count'] == 0
-        cli('pumps', 'connect')
+        cli('pumps', 'connect', '--simulate')
         cli('pump', 'map', '--pump', '1', '--energized', '2', '--deenergized', '1')
         cli('helper', 'stir', '--pump', '1')
         deadline = time.monotonic()+3
