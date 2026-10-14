@@ -8,9 +8,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--version', action='store_true')
     parser.add_argument('--smoke-test', metavar='REPORT_PATH')
+    parser.add_argument('--sdk-import-test', metavar='REPORT_PATH')
     args = parser.parse_args()
     if args.version:
         return 0
+    if args.sdk_import_test:
+        from pumpvalve.runtime_verification import verify_sdk_import
+        return verify_sdk_import(args.sdk_import_test)
     from pumpvalve.runtime import run
     return run(gui=True, smoke_report=args.smoke_test)
 

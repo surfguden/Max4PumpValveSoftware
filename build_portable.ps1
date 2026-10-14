@@ -28,6 +28,13 @@ Check-Exit
 $env:PUMPVALVE_DATA_DIR = Join-Path $PSScriptRoot 'build\packaged smoke user data'
 $SmokeReport = Join-Path $PSScriptRoot 'build\packaged smoke results\report.json'
 $ApplicationExe = Join-Path $Distribution 'Max4PumpValve.exe'
+$SdkImportReport = Join-Path $PSScriptRoot 'build\sdk import verification\report.json'
+$sdkProcess = Start-Process -FilePath $ApplicationExe -ArgumentList @('--sdk-import-test', ('"' + $SdkImportReport + '"')) -PassThru -WindowStyle Hidden
+if (-not $sdkProcess.WaitForExit(15000)) { $sdkProcess.Kill(); throw 'Packaged SDK import test timed out' }
+if ($sdkProcess.ExitCode -ne 0) { throw "Packaged SDK import test failed. See $SdkImportReport" }
+$sdkResult = Get-Content -Raw -LiteralPath $SdkImportReport | ConvertFrom-Json
+if (-not $sdkResult.passed) { throw "Packaged SDK import test failed: $($sdkResult.error)" }
+Copy-Item -LiteralPath $SdkImportReport -Destination (Join-Path $Distribution 'sdk-import-verification.json')
 $process = Start-Process -FilePath $ApplicationExe -ArgumentList @('--smoke-test', ('"' + $SmokeReport + '"')) -PassThru -WindowStyle Hidden
 if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'Packaged simulation smoke test timed out' }
 if ($process.ExitCode -ne 0) { throw "Packaged smoke test failed. See $SmokeReport" }

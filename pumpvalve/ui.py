@@ -1,5 +1,6 @@
 """Qt presentation. All device and experiment behavior lives in Application."""
 from concurrent.futures import ThreadPoolExecutor
+import math
 import json
 from dataclasses import asdict
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QTabWidget, QVBoxLayout,
 from .application import Syringe
 from .drivers.valve_session import VALVE_TYPES, DetectedUnit
 from .storage import VERSION
+from .drivers.cetoni import SYRINGE_PRESETS
 
 
 def json_copy(value):
@@ -95,10 +97,10 @@ class SyringeDialog(QDialog):
         self.profile = None
         layout = QVBoxLayout(self)
         form = QFormLayout()
-        self.profiles = combo(['New custom syringe'] + list(saved))
+        self.profiles = combo(['New custom syringe', 'BD 5ml'] + [name for name in saved if name != 'BD 5ml'])
         form.addRow('Saved syringe', self.profiles)
         self.name = QLineEdit('Custom syringe')
-        self.material = combo(['Glass', 'Steel'])
+        self.material = combo(['Glass', 'Steel', 'Plastic'])
         self.method = combo(['Inner diameter', 'Scale length and volume'])
         self.diameter = number(4.78, 1, 35)
         self.scale_length = number(55, 0.001, 1000)
@@ -133,9 +135,17 @@ class SyringeDialog(QDialog):
         self.update_capacity()
 
     def select_profile(self, name):
-        if name not in self.saved:
+        if name == 'BD 5ml' and name not in self.saved:
+            diameter, stroke = SYRINGE_PRESETS[name]
+            # Round upward to the dialog precision so the 5 mL fill limit
+            # remains within the capacity calculated from the displayed stroke.
+            stroke = math.ceil(stroke * 10000) / 10000
+            p = Syringe(name=name, material='Plastic', inner_diameter_mm=diameter,
+                        max_piston_stroke_mm=stroke, maximum_ml=5)
+        elif name in self.saved:
+            p = Syringe(**self.saved[name])
+        else:
             return
-        p = Syringe(**self.saved[name])
         self.name.setText(p.name)
         self.material.setCurrentText(p.material)
         self.method.setCurrentIndex(0)

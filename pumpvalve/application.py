@@ -48,7 +48,7 @@ class Syringe:
         for name, value in asdict(self).items():
             if name not in ('name', 'material'):
                 finite(value, name)
-        if not self.name.strip() or self.material not in ('Glass', 'Steel'):
+        if not self.name.strip() or self.material not in ('Glass', 'Steel', 'Plastic'):
             raise ValueError('Enter a name and syringe material')
         # Retain the inherited low-pressure-module geometry bounds.
         if not 1 <= self.inner_diameter_mm <= 35 or not 10 <= self.max_piston_stroke_mm <= 65:

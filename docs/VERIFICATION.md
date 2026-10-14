@@ -4,6 +4,20 @@ Build host: Windows 11 x64 (10.0.26200), Python 3.12.14, PySide6 6.11.1,
 PyInstaller 6.22.3. All checks below are simulation or fake-device checks.
 No physical Qmix or serial connection was opened.
 
+## Portable hardware repair
+
+The first physical connection attempt with the original portable build exposed
+a missing `ctypes.util` module. The packaging specification now includes it,
+and the build executes `--sdk-import-test` against the packaged GUI executable.
+That check imports the Qmix DLL loader without loading any native library or
+opening a bus; `sdk-import-verification.json` records its result.
+
+Plastic syringe profiles are now accepted by the shared command schema and GUI.
+The dialog includes the inherited BD 5ml geometry. Regression checks apply the
+profile through the client, persist it, and reload it in the dialog. Pressure
+is metadata, and the preset dimensions must be checked against a mounted syringe.
+Physical test results for each delivered build are recorded separately.
+
 ## Automated acceptance
 
 111 tests passed, with 18 additional unittest subtests. Tests cover:

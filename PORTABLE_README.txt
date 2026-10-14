@@ -64,6 +64,10 @@ settings and valve names. Data and rotating logs are written to
 PUMPVALVE_DATA_DIR can override this location for controlled testing.
 
 VERIFICATION
+sdk-import-verification.json checks that the packaged Qmix DLL loader imports
+without loading native DLLs or opening a bus. Plastic profiles are supported;
+Configure Syringe includes a BD 5ml preset using the inherited BD geometry.
+Pressure remains metadata only, and geometry must match a mounted syringe.
 verification.json records the packaged simulation-only smoke test. Real hardware
 and launch on a clean Windows machine without Python have not been validated.
 The application has been packaged with its own Python and Qt runtime. See the

@@ -42,3 +42,28 @@ def test_ui_disconnected_responsive(tmp_path, monkeypatch):
         qt.processEvents()
     from pumpvalve.storage import load
     assert 'spaces' in load()['config']
+
+
+def test_bd5_plastic_preset_can_apply_and_reload():
+    qt = QApplication.instance() or QApplication([])
+    dialog = SyringeDialog({})
+    try:
+        dialog.profiles.setCurrentText('BD 5ml')
+        dialog.apply()
+        profile = dialog.profile
+        assert profile is not None
+        assert profile.material == 'Plastic'
+        assert profile.inner_diameter_mm == 12.07
+        assert profile.maximum_ml == 5
+        assert abs(profile.capacity - 5) < 0.001
+        from dataclasses import asdict
+        restored = SyringeDialog({profile.name: asdict(profile)})
+        try:
+            restored.profiles.setCurrentText(profile.name)
+            restored.apply()
+            assert restored.profile == profile
+        finally:
+            restored.close()
+    finally:
+        dialog.close()
+        qt.processEvents()

@@ -151,6 +151,16 @@ def test_settings_and_syringe_commands(service):
     assert 'Agent syringe' in load()['syringes']
 
 
+def test_plastic_profile_applies_through_client_and_persists(service):
+    succeed('pumps.connect')
+    profile = dict(name='BD 5ml', material='Plastic', inner_diameter_mm=12.07,
+                   max_piston_stroke_mm=43.6985, minimum_ml=0, maximum_ml=5)
+    result = succeed('pump.syringe', dict(pump=1, profile=profile))
+    assert result['maximum'] == 5
+    from pumpvalve.storage import load
+    assert load()['syringes']['BD 5ml']['material'] == 'Plastic'
+
+
 def test_stop_is_not_blocked_by_reference_request(service):
     c, _ = service
     succeed('pumps.connect')

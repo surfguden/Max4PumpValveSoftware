@@ -3,7 +3,7 @@ from pathlib import Path
 root = Path(SPECPATH)
 a = Analysis([str(root / 'main.py')], pathex=[str(root)],
              binaries=[], datas=[(str(root / 'vendor/qmixsdk'), 'vendor/qmixsdk')],
-             hiddenimports=['serial.tools.list_ports_windows'],
+             hiddenimports=['serial.tools.list_ports_windows', 'ctypes.util'],
              excludes=['tkinter', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets'],
              noarchive=False)
 # Qt 6.11 uses Windows' unversioned ICU API. A conda/Poppler ICU on the build
