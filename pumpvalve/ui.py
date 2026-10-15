@@ -179,6 +179,32 @@ class SyringeDialog(QDialog):
         self.accept()
 
 
+class MotionRateDialog(QDialog):
+    """Edit a rate without sending any device command."""
+    def __init__(self, mode, selected, maximum=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f'{mode.capitalize()} flow rate')
+        layout = QVBoxLayout(self)
+        row = QHBoxLayout()
+        row.addWidget(QLabel('Flow (µL/min)'))
+        self.rate = number(1000 if selected == 'max' else selected, 0.01, decimals=2)
+        row.addWidget(self.rate)
+        self.max_button = button('Max', lambda: None, row)
+        self.max_button.setCheckable(True)
+        self.max_button.toggled.connect(lambda checked: self.rate.setEnabled(not checked))
+        self.max_button.setChecked(selected == 'max')
+        layout.addLayout(row)
+        detail = f'Current device maximum: {maximum:g} µL/min.\n' if maximum else ''
+        layout.addWidget(QLabel(detail + 'Max uses the current device limit when the motion is started.'))
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def selected_rate(self):
+        return 'max' if self.max_button.isChecked() else self.rate.value()
+
+
 class PumpCard(QGroupBox):
     def __init__(self, window, index):
         super().__init__(f'neMESYS · Pump {index+1}')
@@ -190,8 +216,14 @@ class PumpCard(QGroupBox):
         row = QHBoxLayout()
         button('▶ Start', self.start, row)
         button('■ Stop', lambda: window.stop_pump(index), row)
-        button('↑ Refill', lambda: self.command('refill'), row)
-        button('↓ Empty', lambda: self.command('empty'), row)
+        self.motion_rates = dict(refill=1000, empty=1000)
+        self.motion_buttons = {}
+        for mode, text in [('refill', '↑ Refill'), ('empty', '↓ Empty')]:
+            control = button(text, lambda checked=False, m=mode: self.command(m), row)
+            control.setContextMenuPolicy(Qt.CustomContextMenu)
+            control.customContextMenuRequested.connect(lambda position, m=mode: self.edit_motion_rate(m))
+            self.motion_buttons[mode] = control
+        self.update_motion_tooltips()
         root.addLayout(row)
         body = QHBoxLayout()
         self.syringe = SyringeView()
@@ -253,8 +285,21 @@ class PumpCard(QGroupBox):
     def command(self, mode, value=0):
         if mode in ('refill', 'empty'):
             self.initial = self.syringe.state.get('fill')
-        rate = self.flow.value()
+        rate = self.motion_rates[mode] if mode in self.motion_rates else self.flow.value()
         self.window.issue('pump.command', dict(pump=self.index+1, mode=mode, value=value, rate=rate))
+
+    def update_motion_tooltips(self):
+        for mode, control in self.motion_buttons.items():
+            rate = self.motion_rates[mode]
+            text = 'Max (current device limit)' if rate == 'max' else f'{rate:g} µL/min'
+            control.setToolTip(f'{mode.capitalize()}: {text}\nRight-click to set flow rate')
+
+    def edit_motion_rate(self, mode):
+        dialog = MotionRateDialog(mode, self.motion_rates[mode], self.syringe.state.get('max_flow'), self)
+        if dialog.exec() == QDialog.Accepted:
+            self.motion_rates[mode] = dialog.selected_rate()
+            self.update_motion_tooltips()
+            self.window.message.setText(f'{mode.capitalize()} rate set · Save all settings to retain it')
 
     def configure(self):
         dialog = SyringeDialog(self.window.settings.get('syringes', {}), self)
@@ -265,7 +310,7 @@ class PumpCard(QGroupBox):
             profile = dialog.profile
             def done(result):
                 self.flow.setValue(0)
-                self.window.message.setText('Syringe applied. Set flow again before refill or empty.')
+                self.window.message.setText('Syringe applied. Verify flow settings before starting motion.')
             self.window.issue('pump.syringe', dict(pump=self.index+1, profile=asdict(profile)), done)
 
     def map(self):
@@ -400,13 +445,18 @@ class MainWindow(QMainWindow):
         for card in self.cards:
             pumps[str(card.index+1)] = dict(mode=card.mode.currentText(), volume=card.volume.value(),
                 flow=card.flow.value(), level=card.level.value(), energized=card.energized.currentIndex(),
-                deenergized=card.deenergized.currentIndex())
+                deenergized=card.deenergized.currentIndex(), refill_rate=card.motion_rates['refill'],
+                empty_rate=card.motion_rates['empty'])
 
     def restore_pump_controls(self):
         pumps = self.settings.get('ui', {}).get('pumps', {})
         for card in self.cards:
             values = pumps.get(str(card.index+1), {})
             card.mode.setCurrentText(values.get('mode', 'Volume'))
+            for mode in ('refill', 'empty'):
+                # Older settings used the main Flow field for both actions.
+                card.motion_rates[mode] = values.get(mode+'_rate', abs(values.get('flow', 1000)) or 1000)
+            card.update_motion_tooltips()
             for key, control in [('volume', card.volume), ('flow', card.flow), ('level', card.level)]:
                 if key in values:
                     control.setValue(values[key])

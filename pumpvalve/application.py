@@ -262,7 +262,7 @@ class Application:
                 self._rate(state, abs(rate_value))
                 target = state['minimum'] if rate_value > 0 else state['maximum']
             else:
-                rate_value = self._rate(state, rate)
+                rate_value = self._rate(state, state['max_flow'] if mode in ('refill', 'empty') and rate == 'max' else rate)
                 if mode == 'volume' and finite(value, 'Volume') == 0:
                     raise ValueError('Dosing volume cannot be zero')
                 target = (state['fill'] - finite(value, 'Volume') if mode == 'volume' else
@@ -403,8 +403,8 @@ class Application:
                     observed = self._pump_call(lambda: self.pumps.set_valve_position(index, mapping[0]), expires)
                     if observed != mapping[0]:
                         raise RuntimeError('Energized position unverified')
-                    self._dose(index, initial, state['minimum'], flow, expires, 'Emptying')
-                    self._dose(index, state['minimum'], target, flow, expires, 'Refilling')
+                    self._dose(index, initial, state['minimum'], flow, expires, 'Emptying', verify_target=False)
+                    self._dose(index, state['minimum'], target, flow, expires, 'Refilling', verify_target=False)
                     self._publish(step='De-energizing Cetoni valve')
                     observed = self._pump_call(lambda: self.pumps.set_valve_position(index, mapping[1]), expires)
                     if observed != mapping[1]:
@@ -466,7 +466,7 @@ class Application:
         self._check(expires)
         return result
 
-    def _dose(self, index, initial, target, flow, expires, step):
+    def _dose(self, index, initial, target, flow, expires, step, verify_target=True):
         self._publish(step=step)
         self._pump_call(lambda: self.pumps.set_fill_level(index, target, flow), expires)
         while True:
@@ -478,7 +478,9 @@ class Application:
             self._publish(injected=delivered, remaining=state['fill'],
                           progress=min(100, delivered / total * 100) if total else 100)
             if not state['pumping']:
-                if abs(state['fill'] - target) > max(0.001, total * 0.001):
+                # Stirring advances on the SDK idle flag, never a fill threshold.
+                # Injection retains the dose-volume verification it requires.
+                if verify_target and abs(state['fill'] - target) > max(0.001, total * 0.001):
                     raise RuntimeError(f'Target fill unverified: observed {state["fill"]:.6g}, expected {target:.6g} mL')
                 if abs(state['flow']) > 1e-6:
                     raise RuntimeError('Stopped flow unverified')

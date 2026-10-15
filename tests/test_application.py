@@ -35,6 +35,60 @@ def test_stir_modes(app, rate, refill, target):
     assert app.helper_snapshot('stir')['step'] == 'Completed'
 
 
+@pytest.mark.parametrize('fill_matches_target', [False, True])
+def test_stir_waits_for_idle_not_fill(app, monkeypatch, fill_matches_target):
+    motion = dict(target=None, polls=0)
+    transitions = []
+
+    def set_target(index, target, flow):
+        if motion['target'] is not None:
+            assert motion['polls'] >= 3, 'Next motion started while pump was busy'
+        transitions.append(('target', target))
+        motion.update(target=target, polls=0)
+
+    def fill(index):
+        if motion['target'] is not None:
+            motion['polls'] += 1
+        return motion['target'] if fill_matches_target and motion['target'] is not None else 0.6
+
+    def valve(index, position):
+        if position == 1:
+            assert motion['polls'] >= 3, 'Valve switched while pump was busy'
+        transitions.append(('valve', position))
+        return position
+
+    monkeypatch.setattr(app.pumps, 'set_fill_level', set_target)
+    monkeypatch.setattr(app.pumps, 'read_fill_level', fill)
+    monkeypatch.setattr(app.pumps, 'read_status', lambda index: motion['target'] is not None and motion['polls'] < 3)
+    monkeypatch.setattr(app.pumps, 'read_flow', lambda index: 1000 if motion['target'] is not None and motion['polls'] < 3 else 0)
+    monkeypatch.setattr(app.pumps, 'set_valve_position', valve)
+    app.start('stir', 0, rate=1000)
+    assert wait(app)['step'] == 'Completed'
+    assert transitions == [('valve', 2), ('target', 0), ('target', 1), ('valve', 1)]
+
+
+@pytest.mark.parametrize('mode,target', [('refill', 1), ('empty', 0)])
+def test_manual_max_uses_live_device_limit(app, monkeypatch, mode, target):
+    commands = []
+    monkeypatch.setattr(app.pumps, 'set_fill_level', lambda *args: commands.append(args))
+    app.pumps._pumps[0].max_flow_rate_ul_min = 4321
+    app.command_pump(0, mode, rate='max')
+    app.pumps._pumps[0].max_flow_rate_ul_min = 2345
+    app.command_pump(0, mode, rate='max')
+    assert commands == [(0, target, 4321), (0, target, 2345)]
+
+
+def test_stir_busy_deadline_stops_and_skips_later_transitions(app):
+    app.pumps._pumps[0].frozen = True
+    app.start('stir', 0, deadline=0.2)
+    state = wait(app)
+    assert state['step'] == 'Error'
+    assert 'deadline' in state['message'].lower()
+    assert app.pumps.read_valve_position(0) == 2
+    assert app.pumps.read_flow(0) == 0
+    assert app.pumps.read_fill_level(0) == pytest.approx(0.6)
+
+
 @pytest.mark.parametrize('address,before,after', [(a, b, c) for a, positions in
     [(2, ('input', 'output', 'bypass', 'extra')), (3, ('input', 'output', 'bypass'))]
     for b in positions for c in positions])

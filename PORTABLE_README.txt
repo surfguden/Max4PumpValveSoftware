@@ -35,8 +35,11 @@ devices can still be identified. No TriContinent plunger control is included.
 PUMPS AND SYRINGES
 Start applies Volume, Flow or Syringe Level at the chosen flow rate. Positive
 volume/flow dispenses; negative volume/flow aspirates. Volume and Level modes use
-positive flow rates. Flow mode stops at the configured fill limit. Refill/Empty
-use the configured positive flow field. Paired continuous flow is omitted.
+positive flow rates. Flow mode stops at the configured fill limit. Right-click
+Refill or Empty to set its separate positive flow rate in a small dialog. Max
+selects the current device-reported maximum at the time motion starts. Confirm
+with OK; changing a rate does not move the pump. Save all settings retains both
+rates independently of the main Flow field. Paired continuous flow is omitted.
 Configure Syringe supports saved custom profiles, inner diameter or scale-based
 geometry, piston stroke, fill limits and maximum pressure metadata. Pressure is
 not actively monitored. Confirm geometry against the mounted syringe. Geometry
@@ -48,7 +51,12 @@ must be applied explicitly after connecting; they are never silently reapplied.
 
 HELPERS
 Stirring performs one cycle: map/verify Cetoni valve, empty to the configured
-minimum, refill to the chosen level, verify, then de-energize. Full speed uses the
+minimum, wait for idle, refill to the chosen level, wait for idle, then de-energize.
+The helper polls the SDK is_pumping flag at approximately 50 ms intervals and
+checks faults and zero flow before continuing. Fill readings show progress;
+stirring never advances or fails because a volume threshold was crossed or missed.
+Targets still set the travel endpoints. Injection additionally verifies dose volume.
+Full speed uses the
 current syringe's device-reported maximum. No TriContinent valve is commanded.
 Injection verifies the selected TriContinent valve, moves to Before, doses using
 the SDK target-fill operation, verifies stopped flow, then moves to After.

@@ -9,6 +9,8 @@ offline tests opt into it. Connections default to hardware, with the public
 Qmix Elements dual configuration, %LOCALAPPDATA%/CETONI_SDK, and COM3/9600 baud.
 Save all settings / Load settings persist and restore the complete control setup
 without automatically connecting devices, applying syringe profiles or moving them.
+Right-click Refill or Empty to choose its own flow rate or Max. Stirring waits for
+the SDK idle flag after each motion; fill readings only indicate progress.
 
 Version 1.1 adds one shared command dispatcher for GUI and terminal, an attached
 console with a simultaneous GUI, a headless owner, authenticated local clients,

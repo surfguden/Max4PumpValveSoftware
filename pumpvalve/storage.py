@@ -80,6 +80,9 @@ def validate_ui(ui):
             raise ValueError('Invalid saved pump controls')
         if values.get('mode', 'Volume') not in ('Volume', 'Flow', 'Syringe level'):
             raise ValueError('Invalid saved pump mode')
+        for field in ('refill_rate', 'empty_rate'):
+            if field in values and values[field] != 'max' and not bounded(values[field], 0.01, 1000000):
+                raise ValueError(f'Invalid saved pump {field}')
         for field, limits in dict(volume=(-1000, 1000), flow=(-1000000, 1000000),
                                   level=(0, 1000000), energized=(0, 2), deenergized=(0, 2)).items():
             if field in values and (not bounded(values[field], *limits) or

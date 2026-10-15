@@ -90,6 +90,9 @@ sessions to the same physical buses.
 ## Canonical JSON requests
 
 GUI actions and CLI shorthand both create the exact same command envelopes.
+For `pump.command` in `refill` or `empty` mode, JSON `"rate":"max"` resolves the
+current device-reported maximum on the device worker when the command executes.
+Numeric rates remain µL/min. The GUI stores a separate rate for each action.
 For scripting, use an argument file to avoid PowerShell JSON quoting issues:
 
 ```powershell
