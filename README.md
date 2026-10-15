@@ -16,7 +16,9 @@ Stirring includes waits after emptying and refilling and selectable beginning/en
 valve states. Both waits are cancellable and included in the operation deadline.
 File > Connection settings holds SDK/configuration paths and unit count. Device
 pages use tabs, helpers sit side by side, and disabled actions explain why in tooltips.
-Connection attempts clear faults and verify position sensing/enable on every pump.
+Connection attempts clear faults and check every pump. An unreferenced pump
+stays connected with its drive disabled; use Reference move to initialize its
+position before dosing. Connection never homes automatically.
 
 Version 1.1 adds one shared command dispatcher for GUI and terminal, an attached
 console with a simultaneous GUI, a headless owner, authenticated local clients,
@@ -53,5 +55,8 @@ Syringe setup follows CETONI Elements manual sections 7.9 and 7.11. Maximum pres
 is profile metadata, not an active pressure monitor. SDK runtime redistribution
 rights were not established locally; native vendor DLLs are external. The Python
 wrapper is included with original source notices intact. See `docs/SDK_RUNTIME.md`
-and `docs/SOURCE_PROVENANCE.md`. Clean Windows and physical device validation remain
-separate acceptance steps; no hardware testing was authorized or performed.
+and `docs/SOURCE_PROVENANCE.md`. Clean Windows validation remains a separate
+acceptance step. Authorized physical tests and recovery findings are recorded in
+`hardware-tests/2026-10-15/REPORT.md` and the subsequent implementation/retest in
+`hardware-tests/2026-10-15-retest/REPORT.md`. Encoder readback does not replace
+independent measurement of liquid delivery or leakage.

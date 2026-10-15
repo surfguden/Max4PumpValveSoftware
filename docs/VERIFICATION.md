@@ -1,5 +1,9 @@
 # Verification — 2026-10-14
 
+Subsequent implementation and authorized physical validation on 2026-10-15 are
+recorded in `../hardware-tests/2026-10-15-retest/REPORT.md`. The historical checks
+below describe the earlier build, not the subsequent hardware-tested changes.
+
 Build host: Windows 11 x64 (10.0.26200), Python 3.12.14, PySide6 6.11.1,
 PyInstaller 6.22.3. All checks below are simulation or fake-device checks.
 No physical Qmix or serial connection was opened.

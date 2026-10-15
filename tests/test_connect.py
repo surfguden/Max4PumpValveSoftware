@@ -68,7 +68,7 @@ def test_every_discovered_pump_is_recovered_and_verified(monkeypatch, tmp_path, 
         session._require_position_sensing_initialized_before_enable()
         session._enable_pump()
     monkeypatch.setattr(type(session), 'initialize', lambda self: initialize_first())
-    if blocked:
+    if blocked == 'fault':
         with pytest.raises(RuntimeError, match='Pump 2'):
             bank.initialize()
         assert units[1].clears == 1
@@ -76,4 +76,5 @@ def test_every_discovered_pump_is_recovered_and_verified(monkeypatch, tmp_path, 
     else:
         bank.initialize()
         assert bank.unit_count == 3
-        assert all(unit.clears == 1 and not unit.fault and unit.enabled for unit in units)
+        assert all(unit.clears == 1 and not unit.fault for unit in units)
+        assert all(unit.enabled == (not (blocked == 'position' and unit.index == 1)) for unit in units)

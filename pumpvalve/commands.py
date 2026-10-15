@@ -76,6 +76,7 @@ class Commands:
         except Exception as exc:
             self.settings = {}
             self.events.emit('settings.error', error=str(exc))
+        self._sync_profiles()
         from .drivers.valve_session import DetectedUnit
         self.app.units = {v['address']: DetectedUnit(v['address'], error='Disconnected; position unverified')
                           for v in self.settings.get('valves', [])}
@@ -88,6 +89,10 @@ class Commands:
         if state.get('pump') is not None:
             state['pump'] += 1
         self.events.emit('helper.state', state=state, command_id=state.get('command_id'))
+
+    def _sync_profiles(self):
+        self.app.expected_profiles = {int(pump)-1: Syringe(**self.settings['syringes'][name])
+                                     for pump, name in self.settings.get('pump_profiles', {}).items()}
 
     def _monitor(self):
         while not self.closed.is_set():
@@ -123,6 +128,7 @@ class Commands:
             pump_count=a.pumps.unit_count if a.pumps else 0, valve_connected=bool(a.valves and a.valves.connected),
             valves=list(a.units.values()), mapping={i+1: positions for i, positions in a.mapping.items()},
             helpers=helpers,
+            pump_diagnostics=dict(a.pump_diagnostics), pump_connection_error=a.pump_connection_error,
             reservations=sorted((bus, value+1 if bus == 'pump' else value) for bus, value in reservations), settings=settings,
             buses={'qmix_stalled': a.qmix.stalled, 'serial_stalled': a.serial.stalled}))
 
@@ -185,7 +191,7 @@ class Commands:
             if args:
                 raise ValueError('help accepts no arguments')
             return dict(commands=['status', 'ports', 'pumps.connect', 'pumps.disconnect', 'pump.command',
-                'pump.stop', 'pump.syringe', 'pump.map', 'valves.connect', 'valves.scan',
+                'pump.stop', 'pump.diagnose', 'pump.recover', 'pump.syringe', 'pump.map', 'valves.connect', 'valves.scan',
                 'valves.disconnect', 'valve.query', 'valve.move', 'helper.start', 'helper.stop',
                 'settings.save', 'settings.load', 'events', 'shutdown'], pump_numbers='1–4', valve_addresses='physical switch 0–14',
                 units=dict(volume='mL', rate='µL/min'))
@@ -232,14 +238,17 @@ class Commands:
                     self.settings.setdefault('syringes', {})[profile.name] = asdict(profile)
                     self.settings.setdefault('pump_profiles', {})[str(pump)] = profile.name
                     save(self.settings)
+                    self._sync_profiles()
                 return result
+            if command in ('pump.diagnose', 'pump.recover'):
+                if args:
+                    raise ValueError('Unexpected pump diagnostic/recovery arguments')
+                return a.diagnose_pump(index) if command == 'pump.diagnose' else a.recover_pump(index)
             if command == 'pump.stop':
                 if args:
                     raise ValueError('Unexpected stop arguments')
                 a.stop_pump(index).result(3)
-                state = a.qmix.call(lambda: a._read_pump(index), recovery=True, timeout=2)
-                if state['pumping'] or abs(state['flow']) > 1e-6:
-                    raise RuntimeError('Pump stop unverified; device still reports flow')
+                state = a.verify_stopped(index)
                 return {'stopped': True, 'verified': True, 'state': state}
         if command == 'valves.connect':
             args = dict(args)
@@ -285,6 +294,7 @@ class Commands:
                 if args.get('path'):
                     save(loaded)
                 self.settings = loaded
+                self._sync_profiles()
             if not self.app.valves:
                 from .drivers.valve_session import DetectedUnit
                 self.app.units = {v['address']: DetectedUnit(v['address'], error='Disconnected; position unverified')
@@ -298,6 +308,7 @@ class Commands:
                 validate(updated)
                 save(updated)
                 self.settings = updated
+                self._sync_profiles()
             return updated
         if command == 'shutdown':
             if args:

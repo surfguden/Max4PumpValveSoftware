@@ -169,7 +169,7 @@ def test_stop_is_not_blocked_by_reference_request(service):
     succeed('pumps.connect')
     c.app.pumps.reference_move_finished = lambda _: False
     with ThreadPoolExecutor(1) as pool:
-        moving = pool.submit(request, 'pump.command', dict(pump=1, mode='reference'))
+        moving = pool.submit(request, 'pump.command', dict(pump=1, mode='reference', syringe_disconnected=True))
         time.sleep(0.1)
         started = time.monotonic()
         succeed('pump.stop', dict(pump=1))

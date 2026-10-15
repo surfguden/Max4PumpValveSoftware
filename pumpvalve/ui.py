@@ -263,8 +263,14 @@ class PumpCard(QGroupBox):
         body.addLayout(right)
         tools = QVBoxLayout()
         row = QHBoxLayout()
-        self.device_buttons.append(button('Configure syringe…', self.configure, row))
-        self.device_buttons.append(button('Reference move', lambda: self.command('reference'), row))
+        self.configure_button = button('Configure syringe…', self.configure, row)
+        self.device_buttons.append(self.configure_button)
+        self.reference_button = button('Reference move', lambda: self.command('reference'), row)
+        self.device_buttons.append(self.reference_button)
+        tools.addLayout(row)
+        row = QHBoxLayout()
+        self.diagnose_button = button('Diagnostics', self.diagnose, row)
+        self.recover_button = button('Clear fault & verify', self.recover, row)
         tools.addLayout(row)
         row = QHBoxLayout()
         self.valve_buttons = [button('Valve 1', lambda: self.command('valve', 1), row),
@@ -293,17 +299,30 @@ class PumpCard(QGroupBox):
     def refresh_availability(self):
         state = self.syringe.state
         app = self.window.app
+        reference_reason = 'Reference required. Use Reference move to initialize the pump position.'
         reason = ('Connect pumps first using Connect pumps.' if not app.pumps else
                   'The pump bus is unresponsive; resolve hardware state before reconnecting.' if app.qmix.stalled else
                   'This pump is reserved by an active operation.' if ('pump', self.index) in app.reserved else
                   'Waiting for verified pump status.' if not state else
                   'Pump reports a fault; disconnect and reconnect to attempt fault recovery.' if state.get('fault') else
-                  'Stop the pump before starting another operation.' if state.get('pumping') else '')
+                  'Stop the pump before starting another operation.' if state.get('pumping') else
+                  reference_reason if not state.get('position_initialized', True) else '')
         for control in self.device_buttons:
             availability(control, reason)
+        if reason == reference_reason:
+            availability(self.reference_button, '')
+            availability(self.configure_button, '')
+        if self.reference_button.isEnabled():
+            self.reference_button.setToolTip('Reference move initializes the pump encoder by moving to its reference position.')
         if not reason and state.get('valve') not in (1, 2):
             for control in [*self.valve_buttons, self.map_button]:
                 availability(control, 'This pump has no supported two-position valve.')
+        if not reason and state.get('syringe_required') and not state.get('syringe_applied'):
+            for control in [self.device_buttons[0], *self.motion_buttons.values()]:
+                availability(control, 'Saved syringe is not applied. Configure syringe before dosing.')
+        availability(self.recover_button, 'Connect pumps first.' if not app.pumps else
+                     'Stop active operations before fault recovery.' if ('pump', self.index) in app.reserved else
+                     'Restart after resolving stalled I/O.' if app.qmix.stalled else '')
         availability(self.stop_button, '' if app.pumps else 'Connect pumps before requesting a stop.')
 
     def mode_changed(self):
@@ -318,10 +337,19 @@ class PumpCard(QGroupBox):
         self.command(mode, self.volume.value() if mode == 'volume' else self.level.value())
 
     def command(self, mode, value=0):
+        confirmation = {}
+        if mode == 'reference':
+            answer = QMessageBox.warning(self, 'Disconnect syringe before reference move',
+                'Disconnect the syringe from the pump before starting a reference move.\n\n'
+                'The drive will move to its reference position. Is the syringe disconnected?',
+                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+            if answer != QMessageBox.Yes:
+                return
+            confirmation['syringe_disconnected'] = True
         if mode in ('refill', 'empty'):
             self.initial = self.syringe.state.get('fill')
         rate = self.motion_rates[mode] if mode in self.motion_rates else self.flow.value()
-        self.window.issue('pump.command', dict(pump=self.index+1, mode=mode, value=value, rate=rate))
+        self.window.issue('pump.command', dict(pump=self.index+1, mode=mode, value=value, rate=rate, **confirmation))
 
     def update_motion_tooltips(self):
         for mode, control in self.motion_buttons.items():
@@ -353,13 +381,35 @@ class PumpCard(QGroupBox):
         energized, deenergized = self.energized.currentIndex(), self.deenergized.currentIndex()
         self.window.issue('pump.map', dict(pump=self.index+1, energized=energized, deenergized=deenergized))
 
+    def diagnose(self):
+        def show(result):
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f'Pump {self.index+1} diagnostics')
+            layout = QVBoxLayout(dialog)
+            from PySide6.QtWidgets import QPlainTextEdit
+            import json
+            text = QPlainTextEdit(json.dumps(result, indent=2))
+            text.setReadOnly(True)
+            layout.addWidget(text)
+            dialog.resize(660, 480)
+            dialog.exec()
+        self.window.issue('pump.diagnose', dict(pump=self.index+1), show)
+
+    def recover(self):
+        self.window.issue('pump.recover', dict(pump=self.index+1),
+                          lambda _: self.window.message.setText('Fault clear and stopped state verified. Check syringe before motion.'))
+
     def update_state(self, state):
         self.syringe.state = state
         self.syringe.update()
         self.actual_flow.setText(f'{state["flow"]:.2f}')
         self.actual_level.setText(f'{state["fill"]:.4f}')
         self.actual_volume.setText(f'{abs(state["fill"] - self.initial):.4f}' if self.initial is not None else '0.0000')
-        self.status.setText('FAULT' if state['fault'] else '● Pumping' if state['pumping'] else '● Ready · Stopped')
+        self.status.setText('FAULT' if state['fault'] else '● Pumping' if state['pumping'] else
+                           'REFERENCE REQUIRED · Connected' if not state.get('position_initialized', True) else '● Ready · Stopped')
+        if state.get('syringe_required'):
+            self.status.setText(self.status.text() + '\n' + ('Syringe applied: ' if state.get('syringe_applied') else
+                                'APPLY SYRINGE BEFORE DOSING: ') + state['syringe_expected'])
         self.limits.setText(f'Fill: {state["minimum"]:.4f}–{state["maximum"]:.4f} mL\nMax flow: {state["max_flow"]:g} µL/min')
 
 
@@ -652,6 +702,8 @@ class MainWindow(QMainWindow):
         row.addStretch()
         layout.addLayout(row)
         self.pump_pages = QTabWidget()
+        self.pump_error = QLabel('')
+        layout.addWidget(self.pump_error)
         layout.addWidget(self.pump_pages)
         self.tabs.addTab(tab, 'Cetoni Pumps')
         self.set_cards(self.count.value())
@@ -875,6 +927,10 @@ class MainWindow(QMainWindow):
 
     def poll(self):
         cached = self.commands.cached_state()
+        error = cached.get('pump_connection_error', '')
+        self.pump_error.setText('Pump connection failed. Open Diagnostics for details.' if error else '')
+        self.pump_error.setToolTip(error)
+        self.pump_error.setVisible(bool(error))
         if cached.get('pump_connected'):
             self.pump_sim.setChecked(cached.get('pump_simulation', False))
         if cached.get('valve_connected'):
@@ -938,6 +994,8 @@ class MainWindow(QMainWindow):
             observed = self.cards[index].syringe.state
             return ('Waiting for verified pump status.' if not observed else
                     'The selected pump reports a fault; reconnect to attempt fault recovery.' if observed.get('fault') else
+                    'Reference required. Use Reference move on the pump page.' if not observed.get('position_initialized', True) else
+                    'Configure syringe: saved profile is not applied to this connection.' if observed.get('syringe_required') and not observed.get('syringe_applied') else
                     'Stop the selected pump before starting a helper.' if observed.get('pumping') else '')
         availability(self.stir_start, common or selected_pump_reason(self.stir_pump) or ('Apply the selected pump’s energized/not energized valve mapping first.'
                      if self.stir_pump.currentIndex() not in self.app.mapping else ''))

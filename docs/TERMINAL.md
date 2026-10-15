@@ -133,6 +133,56 @@ are `--wait-empty`, `--wait-full`, `--valve-begin` and `--valve-end`.
 The sequence deadline includes motion and both cancellable, fault-monitored waits.
 No saved profile or configuration triggers automatic connection or motion.
 
+### Diagnostics, recovery and syringe state
+
+`pump diagnose --pump 1` captures pump/drive error records, enabled and
+position-sensing state, fill/flow and SDK emergency events. A newly observed
+fault is captured before error recovery; failed connections retain their last
+diagnostic observation. Diagnostics are available with pumps disconnected.
+The GUI's Diagnostics button displays the same result. Fault records are also
+included in helper failure events and the application log.
+
+`pump recover --pump 1` explicitly stops, requests one fault clear, waits up to
+one second for acknowledgement and checks position sensing before enabling.
+A persistent fault is never force-enabled. The result requires verified stopped
+readback. Use Clear fault & verify in the GUI for the same command. If connection
+failed, inspect retained diagnostics and the hardware before reconnecting; a
+fresh owner process may be needed for stale SDK state.
+
+Stop polls readback for up to one second to allow deceleration. Failure reports
+`pumping`, `flow` and `fault` separately; zero flow with pumping=true is still
+unverified. Polling releases the bus between reads so priority Stop stays usable.
+Stop and helper completion require consecutive stable idle fill readings so a
+fill sample taken before the SDK idle transition is not reported as final volume.
+
+Status includes `syringe_expected`, `syringe_required` and `syringe_applied`.
+A saved syringe assignment requires explicit application on every connection,
+including after reconnect, even when XML geometry happens to match. Dosing is
+blocked until the profile is applied and geometry readback matches. The GUI
+displays APPLY SYRINGE BEFORE DOSING and leaves Configure syringe available.
+Loading settings alone never applies a syringe or causes movement.
+
+### Reference after power loss
+
+An unreferenced pump connects with its drive disabled and status
+`position_initialized=false`. The GUI shows REFERENCE REQUIRED and enables
+Reference move and Configure syringe. Dosing and helpers remain blocked.
+Connection never starts homing automatically.
+
+Disconnect the syringe first. Reference move displays a warning popup and only
+proceeds after confirmation; Cancel is the default. From the terminal, use
+`pump reference --pump 1 --syringe-disconnected` to explicitly acknowledge the
+disconnected syringe and initialize the encoder. JSON requests must include
+`"syringe_disconnected":true`. Missing acknowledgement rejects the command before
+motion. Reference does not require an already applied syringe profile. It
+uses the serialized bus, leaves priority Stop available during polling, and
+requires both completed calibration and initialized position sensing before
+reporting success. Stop can cancel reference. Apply the saved syringe profile
+before subsequent dosing. Persistent faults still prevent connection/enable.
+
+Known disconnected pump/valve dependencies reject helper.start immediately;
+accepted helpers still require their final Completed event to establish success.
+
 ## Hardware authorization
 
 Connections use real hardware in normal operation. Simulation is disabled.

@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "command_id": "31a8a1540a824dcf8b044dac172d7463",
+  "source": "gui",
+  "syringe_disconnection_confirmed": true,
+  "started_utc": "2026-10-15T11:43:20.483743+00:00",
+  "completed_utc": "2026-10-15T11:43:22.161935+00:00",
+  "elapsed_s": 1.678192,
+  "final": {
+    "position_initialized": true,
+    "fault": false,
+    "pumping": false,
+    "flow_ul_min": 0.0,
+    "fill_ml": 0.0,
+    "reservations": []
+  },
+  "automated_tests": "157 passed, 18 subtests passed"
+}

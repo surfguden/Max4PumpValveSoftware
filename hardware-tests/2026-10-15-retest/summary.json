@@ -1,0 +1,266 @@
+{
+  "outcomes": 50,
+  "passed": 50,
+  "failed": [],
+  "injection": [
+    {
+      "test": "inject 0.01 mL",
+      "requested": 0.01,
+      "measured_displacement": 0.00999988831028098,
+      "error_ml": -1.1168971902029978e-07,
+      "rate": 1000
+    },
+    {
+      "test": "inject 0.1 mL",
+      "requested": 0.1,
+      "measured_displacement": 0.09999888310279825,
+      "error_ml": -1.1168972017527867e-06,
+      "rate": 5000
+    },
+    {
+      "test": "inject 0.5 mL",
+      "requested": 0.5,
+      "measured_displacement": 0.4999983884533341,
+      "error_ml": -1.6115466658916944e-06,
+      "rate": 10000
+    }
+  ],
+  "stops": [
+    {
+      "test": "manual flow stop 5000",
+      "roundtrip_s": 0.5088957999832928
+    },
+    {
+      "test": "manual flow stop -5000",
+      "roundtrip_s": 0.4991382000152953
+    }
+  ],
+  "dwells": [
+    {
+      "test": "stir normal 1",
+      "step": "Waiting after empty",
+      "requested_s": 1,
+      "observed_s": 0.999793
+    },
+    {
+      "test": "stir normal 1",
+      "step": "Waiting after full",
+      "requested_s": 1,
+      "observed_s": 0.998773
+    },
+    {
+      "test": "stir normal 3",
+      "step": "Waiting after empty",
+      "requested_s": 0.5,
+      "observed_s": 0.505124
+    },
+    {
+      "test": "stir normal 3",
+      "step": "Waiting after full",
+      "requested_s": 0.5,
+      "observed_s": 0.506126
+    }
+  ],
+  "checks": [
+    {
+      "test": "real Qmix reconnect",
+      "passed": true
+    },
+    {
+      "test": "retained diagnostics available",
+      "passed": true
+    },
+    {
+      "test": "real serial reconnect",
+      "passed": true
+    },
+    {
+      "test": "saved syringe blocks motion before reapply",
+      "passed": true
+    },
+    {
+      "test": "real hardware baseline",
+      "passed": true
+    },
+    {
+      "test": "5 mL syringe configured",
+      "passed": true
+    },
+    {
+      "test": "Cetoni valve both positions",
+      "passed": true
+    },
+    {
+      "test": "TriContinent input",
+      "passed": true
+    },
+    {
+      "test": "TriContinent output",
+      "passed": true
+    },
+    {
+      "test": "TriContinent bypass",
+      "passed": true
+    },
+    {
+      "test": "TriContinent extra",
+      "passed": true
+    },
+    {
+      "test": "stir normal 1",
+      "passed": true
+    },
+    {
+      "test": "stir normal 2",
+      "passed": true
+    },
+    {
+      "test": "stir normal 3",
+      "passed": true
+    },
+    {
+      "test": "inject 0.01 mL",
+      "passed": true
+    },
+    {
+      "test": "inject 0.1 mL",
+      "passed": true
+    },
+    {
+      "test": "inject 0.5 mL",
+      "passed": true
+    },
+    {
+      "test": "manual flow stop 5000",
+      "passed": true
+    },
+    {
+      "test": "manual flow stop -5000",
+      "passed": true
+    },
+    {
+      "test": "stir cancel during Emptying via helper.stop",
+      "passed": true
+    },
+    {
+      "test": "stir cancel during Refilling via helper.stop",
+      "passed": true
+    },
+    {
+      "test": "stir cancel during Waiting after empty via helper.stop",
+      "passed": true
+    },
+    {
+      "test": "stir cancel during Waiting after full via helper.stop",
+      "passed": true
+    },
+    {
+      "test": "inject cancel during Injecting via helper.stop",
+      "passed": true
+    },
+    {
+      "test": "inject cancel during Injecting via pump.stop",
+      "passed": true
+    },
+    {
+      "test": "deadline stops pump",
+      "passed": true
+    },
+    {
+      "test": "reject invalid request",
+      "passed": true
+    },
+    {
+      "test": "reject invalid request",
+      "passed": true
+    },
+    {
+      "test": "reject invalid request",
+      "passed": true
+    },
+    {
+      "test": "reject invalid request",
+      "passed": true
+    },
+    {
+      "test": "reject insufficient injection volume",
+      "passed": true
+    },
+    {
+      "test": "recovery injection",
+      "passed": true
+    },
+    {
+      "test": "final stopped and responsive",
+      "passed": true
+    },
+    {
+      "test": "serial input -> input",
+      "passed": true
+    },
+    {
+      "test": "serial input -> output",
+      "passed": true
+    },
+    {
+      "test": "serial input -> bypass",
+      "passed": true
+    },
+    {
+      "test": "serial input -> extra",
+      "passed": true
+    },
+    {
+      "test": "serial output -> input",
+      "passed": true
+    },
+    {
+      "test": "serial output -> output",
+      "passed": true
+    },
+    {
+      "test": "serial output -> bypass",
+      "passed": true
+    },
+    {
+      "test": "serial output -> extra",
+      "passed": true
+    },
+    {
+      "test": "serial bypass -> input",
+      "passed": true
+    },
+    {
+      "test": "serial bypass -> output",
+      "passed": true
+    },
+    {
+      "test": "serial bypass -> bypass",
+      "passed": true
+    },
+    {
+      "test": "serial bypass -> extra",
+      "passed": true
+    },
+    {
+      "test": "serial extra -> input",
+      "passed": true
+    },
+    {
+      "test": "serial extra -> output",
+      "passed": true
+    },
+    {
+      "test": "serial extra -> bypass",
+      "passed": true
+    },
+    {
+      "test": "serial extra -> extra",
+      "passed": true
+    },
+    {
+      "test": "final state",
+      "passed": true
+    }
+  ]
+}

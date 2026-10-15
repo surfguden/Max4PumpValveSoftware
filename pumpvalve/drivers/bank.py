@@ -47,10 +47,7 @@ class CetoniPumpBank:
                 try:
                     if pump.is_in_fault_state():
                         pump.clear_fault()
-                    # A persistent fault or invalid position sensing must still
-                    # fail connection. This never performs a reference move.
-                    self._session._require_position_sensing_initialized_before_enable()
-                    self._session._enable_pump()
+                    self._session.prepare_connected_drive()
                 except Exception as exc:
                     raise RuntimeError(f'Pump {index + 1}: fault recovery/enable failed: {exc}') from exc
                 finally:
@@ -95,6 +92,7 @@ class CetoniPumpBank:
     def read_fill_level(self, index: int) -> float: return self._call(index, "read_fill_level")
     def read_status(self, index: int) -> bool: return self._call(index, "read_status")
     def read_flow(self, index: int) -> float: return self._call(index, "read_flow")
+    def read_position_initialized(self, index: int) -> bool: return self._call(index, 'read_position_initialized')
     def read_fault(self, index: int) -> bool: return self._call(index, "read_fault")
     def read_syringe(self, index: int) -> tuple[float, float]: return self._call(index, "read_syringe")
     def configure_syringe(self, index: int, config: dict | None) -> None: self._call(index, "configure_syringe", config)
@@ -110,6 +108,16 @@ class CetoniPumpBank:
         if int(valve.number_of_valve_positions()) != 2:
             raise RuntimeError(f"Pump {index + 1} valve is not a two-position valve")
         return int(valve.actual_valve_position()) + 1
+
+    def diagnostics(self, index):
+        current = self._call(index, 'diagnostics')
+        return {'current': current, 'history': list(self._session.diagnostic_history)}
+
+    def recover_fault(self, index):
+        return self._call(index, 'recover_fault')
+
+    def last_diagnostics(self):
+        return {'latest': self._session.last_diagnostics, 'history': list(self._session.diagnostic_history)}
 
     def set_valve_position(self, index: int, position: int) -> int:
         if position not in (1, 2):
@@ -156,7 +164,16 @@ class SimulatedPumpBank:
     def read_fill_level(self, index: int) -> float: return self._pump(index).read_fill_level()
     def read_status(self, index: int) -> bool: return self._pump(index).read_status()
     def read_flow(self, index: int) -> float: return self._pump(index).read_flow()
+    def read_position_initialized(self, index: int) -> bool: return True
     def read_fault(self, index: int) -> bool: return self._pump(index).read_fault()
+    def diagnostics(self, index):
+        return dict(fault=self.read_fault(index), pumping=self.read_status(index),
+                    fill=self.read_fill_level(index), flow=self.read_flow(index), simulation=True)
+    def recover_fault(self, index):
+        before = self.diagnostics(index)
+        self.stop(index)
+        self._pump(index).fault = False
+        return dict(before=before, after=self.diagnostics(index))
     def read_syringe(self, index: int) -> tuple[float, float] | None: return self._pump(index).read_syringe()
     def configure_syringe(self, index: int, config: dict | None) -> None: self._pump(index).configure_syringe(config)
     def configure_flow_unit(self, index: int, unit: str) -> None: self._pump(index).configure_flow_unit(unit)

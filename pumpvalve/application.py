@@ -68,6 +68,9 @@ class Application:
         self.pump_connecting = Event()
         self.valves = None
         self.profiles = {}
+        self.expected_profiles = {}
+        self.pump_diagnostics = {}
+        self.pump_connection_error = ''
         self.mapping = {}
         self.units = {}
         self.lock = Lock()
@@ -133,12 +136,16 @@ class Application:
                     bank.set_configuration_path(Path(configuration))
                 try:
                     bank.initialize()
-                except Exception:
+                except Exception as exc:
+                    self.pump_connection_error = str(exc)
+                    if hasattr(bank, 'last_diagnostics'):
+                        self.pump_diagnostics[0] = bank.last_diagnostics()
                     bank.cleanup()
                     raise
                 self.profiles.clear()
                 self.mapping.clear()
                 self.pumps = bank
+                self.pump_connection_error = ''
                 return bank.unit_count
             return self.qmix.call(connect, timeout=20)
         finally:
@@ -208,29 +215,46 @@ class Application:
         bank = self.pumps
         maximum, flow = bank.capabilities(index)
         profile = self.profiles.get(index)
+        syringe = bank.read_syringe(index)
+        expected = self.expected_profiles.get(index)
+        applied = profile is not None and syringe is not None and all(
+            math.isclose(actual, requested, rel_tol=1e-6, abs_tol=1e-5)
+            for actual, requested in zip(syringe, (profile.inner_diameter_mm, profile.max_piston_stroke_mm)))
+        if expected and profile != expected:
+            applied = False
+        fault = bank.read_fault(index)
+        if fault and hasattr(bank, 'last_diagnostics'):
+            self.pump_diagnostics[index] = bank.last_diagnostics()
         return {'fill': bank.read_fill_level(index), 'flow': bank.read_flow(index),
-                'pumping': bank.read_status(index), 'fault': bank.read_fault(index),
+                'pumping': bank.read_status(index), 'fault': fault,
+                'position_initialized': bank.read_position_initialized(index),
                 'capacity': maximum, 'max_flow': flow,
                 'minimum': profile.minimum_ml if profile else 0,
                 'maximum': min(maximum, profile.maximum_ml) if profile else maximum,
-                'valve': bank.read_valve_position(index), 'syringe': bank.read_syringe(index)}
+                'valve': bank.read_valve_position(index), 'syringe': syringe,
+                'syringe_expected': expected.name if expected else None,
+                'syringe_applied': applied, 'syringe_required': expected is not None}
 
     def read_pumps(self):
         if self.pump_connecting.is_set():
             return []
         return self.qmix.call(lambda: [self._read_pump(i) for i in range(self.pumps.unit_count)] if self.pumps else [])
 
-    def _ready(self, index):
+    def _ready(self, index, require_syringe=False, allow_unreferenced=False):
         state = self._read_pump(index)
         if state['fault']:
             raise RuntimeError('Pump reports a fault')
         if state['pumping']:
             raise RuntimeError('Stop pump before starting an operation')
+        if not state['position_initialized'] and not allow_unreferenced:
+            raise RuntimeError('Reference required: run Reference move before dosing or starting helpers')
+        if require_syringe and state['syringe_required'] and not state['syringe_applied']:
+            raise ValueError('Saved syringe profile is not applied to this connection; configure syringe before motion')
         for name in ('fill', 'max_flow', 'minimum', 'maximum'):
             finite(state[name], name)
         if state['max_flow'] <= 0 or state['maximum'] <= state['minimum']:
             raise RuntimeError('Invalid supported limits')
-        if not state['minimum'] - 0.001 <= state['fill'] <= state['maximum'] + 0.001:
+        if state['position_initialized'] and not state['minimum'] - 0.001 <= state['fill'] <= state['maximum'] + 0.001:
             raise RuntimeError('Current fill is outside configured syringe limits')
         return state
 
@@ -246,11 +270,13 @@ class Application:
             raise ValueError('Target fill is outside configured syringe limits')
         return target
 
-    def command_pump(self, index, mode, value=0, rate=0):
+    def command_pump(self, index, mode, value=0, rate=0, syringe_disconnected=False):
         if mode == 'reference':
+            if syringe_disconnected is not True:
+                raise ValueError('Disconnect the syringe before a reference move and confirm syringe_disconnected=true')
             return self._reference(index)
         def command():
-            state = self._ready(index)
+            state = self._ready(index, require_syringe=mode != 'valve')
             if mode == 'valve':
                 if finite(value, 'Valve position') not in (1, 2):
                     raise ValueError('Valve position must be exactly 1 or 2')
@@ -279,7 +305,9 @@ class Application:
         cancelled.clear()
         try:
             def start():
-                self._ready(index)
+                # Homing establishes the encoder position; it does not dose a
+                # syringe volume and must remain available before setup is applied.
+                self._ready(index, allow_unreferenced=True)
                 self.pumps.start_reference_move(index)
             self.qmix.call(start)
             expires = time.monotonic() + 60
@@ -292,6 +320,10 @@ class Application:
                 if fault:
                     raise RuntimeError('Reference fault')
                 if finished:
+                    if not self.qmix.call(lambda: self.pumps.read_position_initialized(index)):
+                        raise RuntimeError('Reference finished but position sensing is still uninitialized')
+                    self.qmix.call(lambda: self.pumps.stop(index))
+                    self.verify_stopped(index)
                     return
                 cancelled.wait(0.05)
         except Exception:
@@ -303,12 +335,17 @@ class Application:
     def configure_syringe(self, index, profile):
         profile.validate()
         def configure():
-            self._ready(index)
+            self._ready(index, allow_unreferenced=True)
             self.pumps.configure_syringe(index, asdict(profile))
-            self.profiles[index] = profile
             maximum, _ = self.pumps.capabilities(index)
             if profile.maximum_ml > maximum + 1e-6:
                 raise ValueError('SDK capacity is below configured fill limit; edit syringe limits')
+            geometry = self.pumps.read_syringe(index)
+            if geometry is None or not all(math.isclose(actual, wanted, rel_tol=1e-6, abs_tol=1e-5)
+                    for actual, wanted in zip(geometry, (profile.inner_diameter_mm, profile.max_piston_stroke_mm))):
+                self.profiles.pop(index, None)
+                raise RuntimeError('Syringe geometry readback does not match requested profile')
+            self.profiles[index] = profile
             return self._read_pump(index)
         return self._manual([('pump', index)], self.qmix, configure)
 
@@ -368,12 +405,67 @@ class Application:
         return self.qmix.submit(lambda: self.pumps.stop(index) if self.pumps else None,
                                 priority=0, recovery=True)
 
+    def verify_stopped(self, index, timeout=1):
+        """Poll settling on the caller; keep the bus available for priority Stop."""
+        expires = time.monotonic() + timeout
+        idle_fill = None
+        while True:
+            state = self.qmix.call(lambda: self._read_pump(index), recovery=True, timeout=2, priority=0)
+            if not state['pumping'] and abs(state['flow']) <= 1e-6:
+                if idle_fill is not None and abs(state['fill']-idle_fill) <= 1e-7:
+                    return state
+                idle_fill = state['fill']
+            else:
+                idle_fill = None
+            if time.monotonic() >= expires:
+                raise RuntimeError(f'Pump stop unverified: pumping={state["pumping"]}, '
+                                   f'flow={state["flow"]:g} µL/min, fault={state["fault"]}. '
+                                   'Inspect diagnostics before further motion.')
+            time.sleep(0.025)
+
+    def diagnose_pump(self, index):
+        def capture():
+            previous = self.pump_diagnostics.get(index, {})
+            if not self.pumps:
+                return {'connected': False, 'last_observation': self.pump_diagnostics.get(index, {}),
+                        'connection_error': self.pump_connection_error,
+                        'recovery': 'Inspect hardware and vendor diagnostics, then reconnect. A fresh application restart may be needed.'}
+            if hasattr(self.pumps, 'diagnostics'):
+                result = self.pumps.diagnostics(index)
+            else:
+                result = self._read_pump(index)
+            self.pump_diagnostics[index] = result
+            return {'connected': True, 'observation': result, 'previous_observation': previous}
+        return self.qmix.call(capture, recovery=True)
+
+    def recover_pump(self, index):
+        def recover():
+            if not self.pumps:
+                raise RuntimeError('Pump disconnected; inspect last diagnostics and reconnect first')
+            try:
+                return self.pumps.recover_fault(index)
+            finally:
+                if hasattr(self.pumps, 'last_diagnostics'):
+                    self.pump_diagnostics[index] = self.pumps.last_diagnostics()
+        keys = [('pump', index)]
+        self._reserve(keys)
+        try:
+            result = self.qmix.call(recover)
+            self.verify_stopped(index)
+            return result
+        finally:
+            self._release(keys)
+
     def start(self, kind, index, *, rate=None, refill='Full syringe', volume=0,
               address=None, before='input', after='output', deadline=120, command_id=None,
               wait_full=0, wait_empty=0, valve_begin='Energized', valve_end='Not energized'):
         keys = [('pump', index)] + ([('serial', 0)] if kind == 'inject' else [])
         if kind not in ('stir', 'inject'):
             raise ValueError('Unknown helper')
+        if not self.pumps or not 0 <= index < self.pumps.unit_count:
+            raise RuntimeError('Selected pump disconnected')
+        if kind == 'inject' and not (self.valves and self.valves.connected):
+            raise RuntimeError('Selected valve disconnected')
         deadline = finite(deadline, 'Operation deadline')
         if not 0 < deadline <= 3600:
             raise ValueError('Deadline must be within 0–3600 seconds')
@@ -388,11 +480,11 @@ class Application:
         self._reserve(keys)
         self.cancel.clear()
         self._publish(running=True, kind=kind, pump=index, command_id=command_id, step='Validating', message='', progress=0,
-                      injected=0, remaining=0)
+                      injected=0, remaining=0, diagnostics={})
         def run():
             try:
                 expires = time.monotonic() + deadline
-                state = self._pump_call(lambda: self._ready(index), expires)
+                state = self._pump_call(lambda: self._ready(index, require_syringe=True), expires)
                 flow = self._rate(state, state['max_flow'] if rate is None else rate)
                 initial = state['fill']
                 if kind == 'stir':
@@ -438,19 +530,30 @@ class Application:
                     self._dose(index, initial, target, flow, expires, 'Injecting')
                     self._publish(step='Moving valve after injection')
                     self._serial_call(lambda: self._move_valve(address, after), expires)
+                final = self._pump_call(lambda: self._read_pump(index), expires)
+                if final['fault'] or final['pumping'] or abs(final['flow']) > 1e-6:
+                    raise RuntimeError('Final pump idle state unverified')
+                if kind == 'inject' and abs(final['fill']-target) > max(0.001, volume_value*.001):
+                    raise RuntimeError('Final injection volume unverified')
                 self._check(expires)
-                self._publish(step='Completed', message='Completion and final positions verified', progress=100)
+                self._publish(step='Completed', message='Completion and final positions verified', progress=100,
+                              remaining=final['fill'], injected=abs(initial-final['fill']) if kind == 'inject'
+                              else abs(final['fill']-state['minimum']))
             except Exception as exc:
                 cancelled = self.cancel.is_set() or isinstance(exc, Cancelled)
                 future = self.stop_pump(index)
                 try:
                     future.result(3)
-                    stopped = self.qmix.call(lambda: not self.pumps.read_status(index) and abs(self.pumps.read_flow(index)) < 1e-6,
-                                             recovery=True, timeout=2)
-                    detail = 'Pump stopped (readback verified).' if stopped else 'Pump stop unverified.'
-                except Exception:
-                    detail = 'Pump stop unverified; inspect device.'
+                    self.verify_stopped(index)
+                    detail = 'Pump stopped (readback verified).'
+                except Exception as stop_error:
+                    detail = str(stop_error)
+                try:
+                    diagnostics = self.diagnose_pump(index)
+                except Exception as diagnostic_error:
+                    diagnostics = {'error': str(diagnostic_error)}
                 self._publish(step='Cancelled' if cancelled else 'Error',
+                              diagnostics=diagnostics,
                               message=f'{exc}. {detail} Later valve transitions skipped; query positions before reuse.')
             finally:
                 self._publish(running=False)
@@ -498,6 +601,7 @@ class Application:
     def _dose(self, index, initial, target, flow, expires, step, verify_target=True):
         self._publish(step=step)
         self._pump_call(lambda: self.pumps.set_fill_level(index, target, flow), expires)
+        idle_fill = None
         while True:
             state = self._pump_call(lambda: self._read_pump(index), expires)
             if state['fault']:
@@ -507,6 +611,13 @@ class Application:
             self._publish(injected=delivered, remaining=state['fill'],
                           progress=min(100, delivered / total * 100) if total else 100)
             if not state['pumping']:
+                # Fill can precede the SDK's transition to idle within one read.
+                # Require a second stable idle sample before reporting final volume.
+                if idle_fill is None or abs(state['fill'] - idle_fill) > 1e-7:
+                    idle_fill = state['fill']
+                    if self.cancel.wait(0.05):
+                        raise Cancelled('Sequence cancelled')
+                    continue
                 # Stirring advances on the SDK idle flag, never a fill threshold.
                 # Injection retains the dose-volume verification it requires.
                 if verify_target and abs(state['fill'] - target) > max(0.001, total * 0.001):
@@ -514,6 +625,7 @@ class Application:
                 if abs(state['flow']) > 1e-6:
                     raise RuntimeError('Stopped flow unverified')
                 return
+            idle_fill = None
             if self.cancel.wait(0.05):
                 raise Cancelled('Sequence cancelled')
 

@@ -1,0 +1,11 @@
+# Local authenticated owner descriptor and lock are runtime state.
+**/endpoint.json
+**/owner.lock
+# Raw bus/session captures stay local; publish concise verification summaries.
+**/session/
+**/*.jsonl
+**/*.txt
+**/*.json
+!**/summary.json
+!**/build-manifest.json
+!**/reference-validation.json

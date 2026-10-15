@@ -33,9 +33,12 @@ def parser():
     watch.add_argument('--session')
     watch.add_argument('--once', action='store_true')
     pump = sub.add_parser('pump').add_subparsers(dest='operation', required=True)
-    for name in ('stop', 'refill', 'empty', 'reference', 'volume', 'flow', 'level', 'valve', 'map'):
+    for name in ('stop', 'diagnose', 'recover', 'refill', 'empty', 'reference', 'volume', 'flow', 'level', 'valve', 'map'):
         operation = pump.add_parser(name)
         operation.add_argument('--pump', type=int, required=True)
+        if name == 'reference':
+            operation.add_argument('--syringe-disconnected', action='store_true',
+                                   help='Confirm that the syringe has been disconnected before homing')
         if name in ('refill', 'empty', 'volume', 'flow', 'level'):
             operation.add_argument('--rate', type=float, required=True, help='µL/min')
         if name in ('volume', 'level', 'valve'):
@@ -99,7 +102,7 @@ def envelope(namespace):
         return action, {}, None
     operation = args.pop('operation')
     if action == 'pump':
-        if operation in ('stop', 'map'):
+        if operation in ('stop', 'map', 'diagnose', 'recover'):
             return 'pump.'+operation, args, None
         return 'pump.command', dict(mode=operation, **args), None
     if action in ('pumps', 'valves'):

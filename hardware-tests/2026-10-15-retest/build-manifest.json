@@ -1,0 +1,32 @@
+{
+  "branch": "main",
+  "base_commit": "1f828479b10ca7155e58500203d119fc99b4f07a",
+  "includes_uncommitted_changes": true,
+  "source_sha256": {
+    "pumpvalve\\application.py": "176bdc89ad927e158ff88c73f919b7b52b39aaf7e12b794731c1f7a50d717c58",
+    "pumpvalve\\cli.py": "da4f0907b3719e275dda43e42ad3848ed5163188318d11adc6b7f8fbe18f68ab",
+    "pumpvalve\\commands.py": "a700f1abcd4acbf9458ca937fbc4ff2515f6ec56eb277cd963836a98b1f1e950",
+    "pumpvalve\\ipc.py": "a3d79ecadde3d325b7acc8fef9f6e6d0ff8b7242af824ff6a4a421607be4fe27",
+    "pumpvalve\\logging_support.py": "00c80cf5cb33feb39c3df252bf5d1c13c561df162c796d1b8f5d10f29410662f",
+    "pumpvalve\\runtime.py": "292faf124982b2d4eed8f076abf909ce51d41e5c1326d79a7f372a47c57a48d1",
+    "pumpvalve\\runtime_verification.py": "cb4e12cb025886e07b52c498d732855fce44ef1241e5fb8cf5d64507e709efb9",
+    "pumpvalve\\simulation.py": "a52a2f39bf03c0acaec6fd56a0d71a1bb5e58859f4c817226105d1546020e067",
+    "pumpvalve\\smoke.py": "c40a510d6164cba69d0860561dd125af7e62565e1ab56002f53526cd08ec388a",
+    "pumpvalve\\storage.py": "32c0f7a8013d97f4e908b08df01acd9d2df734bf854adaed58ac839e73c40862",
+    "pumpvalve\\ui.py": "f9c6dde009dbaa3f6230ab490424b9d2027e7ac9fc35ede758f7eb7bbd6de69e",
+    "pumpvalve\\workers.py": "098d15edb3184865c4e3c93d9d03de3db3fcda6f7d835297dc9ffb0d2e31f0ca",
+    "pumpvalve\\__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pumpvalve\\drivers\\bank.py": "ea23c878a9b6e7e3fe276b49fdbc1bb30b8befc492a1d9681c66c9d9fbe9d7ee",
+    "pumpvalve\\drivers\\cetoni.py": "4313504855bdf262b48e4d495c68efc642036a2ad96c6287675f2191bf065c53",
+    "pumpvalve\\drivers\\simulated.py": "e3e4755881678fbe2e0e6ca568a5f91182824295dbf6a72f5346a5dad2ba75ce",
+    "pumpvalve\\drivers\\tricontinent_valve.py": "b8f77c68935ff23c6d5951c8908f74b7a3fcb3eea9fcc52e3ca39c97a26d1b92",
+    "pumpvalve\\drivers\\valve_session.py": "f458c25c8efc1e468ccb642141fed377b37300bcbf8d7ea69b38d4400fbeaf57",
+    "pumpvalve\\drivers\\valve_settings.py": "6603393ead08ef467b50b4b6c36878749b8ebd0d4ec9bee1d3d0574dfcfc2b68",
+    "pumpvalve\\drivers\\__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "executable_sha256": {
+    "Max4PumpValve.exe": "12e880bcd3fb5dc97c10cd794c818f580ad4b4e1da6e209cc94d71a08aa95296",
+    "Max4PumpValveCtl.exe": "9bbdb0ff629457ced83c9aeeee4614eefafe2808a7b24a82606cf8351f2489e0"
+  },
+  "automated_tests": "149 passed, 18 subtests passed"
+}

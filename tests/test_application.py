@@ -307,7 +307,7 @@ def test_reference_can_stop_without_blocking_bus(app):
     errors = []
     def run():
         try:
-            app.command_pump(0, 'reference')
+            app.command_pump(0, 'reference', syringe_disconnected=True)
         except Exception as exc:
             errors.append(exc)
     thread = threading.Thread(target=run)

@@ -138,6 +138,9 @@ class CetoniPump:
     max_flow_rate_ul_min: float | None = None
     max_volume_ml: float | None = None
     cleanup_timeout_s: float = 5.0
+    last_diagnostics: dict = field(default_factory=dict)
+    diagnostic_history: list = field(default_factory=list)
+    _fault_observed: set = field(default_factory=set)
     consecutive_init_fault_clears: int = 0
 
     def _load_sdk(self) -> None:
@@ -185,6 +188,7 @@ class CetoniPump:
             try:
                 self._initialize_qmix_session(auto_clear_fault=True)
             except Exception as exc:
+                self.last_diagnostics = self.diagnostics()
                 try:
                     self.cleanup()
                 except Exception as rollback_exc:
@@ -204,6 +208,8 @@ class CetoniPump:
         """
         pump = self._require_pump()
         fault_before_clear = bool(pump.is_in_fault_state())
+        if fault_before_clear:
+            self.last_diagnostics = self.diagnostics()
         if fault_before_clear:
             self.consecutive_init_fault_clears += 1
         else:
@@ -298,8 +304,7 @@ class CetoniPump:
             self._auto_clear_fault_on_initialize()
         elif self.pump.is_in_fault_state():
             self.pump.clear_fault()
-        self._require_position_sensing_initialized_before_enable()
-        self._enable_pump()
+        self.prepare_connected_drive()
         self.configure_flow_unit("ul/min")
         self.pump.set_volume_unit(self.qmixpump.UnitPrefix.milli, self.qmixpump.VolumeUnit.litres)
         self.max_flow_rate_ul_min = float(self.pump.get_flow_rate_max())
@@ -326,7 +331,7 @@ class CetoniPump:
                 "readiness condition in QmixElements before reconnecting."
             )
 
-    def _enable_pump(self) -> None:
+    def _require_no_fault(self) -> None:
         pump = self._require_pump()
         if pump.is_in_fault_state():
             # initialize() clears the device fault before reaching this gate.
@@ -350,6 +355,24 @@ class CetoniPump:
                 "Qmix pump remains in a fault state after initialization cleared its fault latch."
                 f"{detail} Inspect and resolve the fault in QmixElements before enabling the pump."
             )
+
+    def prepare_connected_drive(self) -> None:
+        """Keep an unreferenced drive disabled, but connected for explicit homing."""
+        pump = self._require_pump()
+        self._require_no_fault()
+        if pump.is_position_sensing_initialized():
+            self._enable_pump()
+            return
+        if pump.is_enabled():
+            pump.stop_pumping()
+            pump.enable(False)
+        if pump.is_enabled():
+            raise CetoniPumpError('Unreferenced pump could not be disabled; connection refused')
+        log_transaction('pump', 'reference_required', response={'position_initialized': False, 'enabled': False})
+
+    def _enable_pump(self) -> None:
+        pump = self._require_pump()
+        self._require_no_fault()
         enabled_before = bool(pump.is_enabled())
         if not enabled_before:
             with log_call("pump", "enable", command=True, response_stage="OBSERVED") as result:
@@ -544,8 +567,83 @@ class CetoniPump:
     def read_flow(self) -> float:
         return float(self._require_pump().get_flow_is())
 
+    def read_position_initialized(self) -> bool:
+        return bool(self._require_pump().is_position_sensing_initialized())
+
     def read_fault(self) -> bool:
-        return bool(self._require_pump().is_in_fault_state())
+        fault = bool(self._require_pump().is_in_fault_state())
+        key = id(self.pump)
+        if fault and key not in self._fault_observed:
+            self.last_diagnostics = self.diagnostics()
+        if fault:
+            self._fault_observed.add(key)
+        else:
+            self._fault_observed.discard(key)
+        return fault
+
+    def diagnostics(self) -> dict:
+        """Best-effort capture on the bus owner, before errors are cleared."""
+        import ctypes
+        from datetime import datetime, timezone
+        result = {'time': datetime.now(timezone.utc).isoformat()}
+        pump = self.pump
+        if pump is None:
+            return {**result, 'error': 'Pump handle unavailable'}
+        for name, method in [('name', 'get_device_name'), ('fault', 'is_in_fault_state'),
+                             ('enabled', 'is_enabled'), ('pumping', 'is_pumping'),
+                             ('position_initialized', 'is_position_sensing_initialized'),
+                             ('fill', 'get_fill_level'), ('flow', 'get_flow_is')]:
+            try:
+                result[name] = getattr(pump, method)()
+            except Exception as exc:
+                result[name + '_error'] = str(exc)
+        try:
+            error = pump.read_last_error()
+            result['last_error'] = dict(code=error.code, message=error.message)
+        except Exception as exc:
+            result['last_error_read_error'] = str(exc)
+        try:
+            function = self.qmixpump.pump_api.LCP_GetPumpDriveHandle
+            function.restype = ctypes.c_longlong
+            handle = function(pump.handle)
+            if handle <= 0:
+                raise RuntimeError('Pump drive handle unavailable')
+            drive = self.qmixbus.Device(ctypes.c_longlong(handle))
+            error = drive.read_last_error()
+            result['drive'] = dict(name=drive.get_device_name(), code=error.code, message=error.message)
+        except Exception as exc:
+            result['drive_read_error'] = str(exc)
+        result['events'] = []
+        try:
+            for _ in range(64):
+                event = self.bus.read_event()
+                if not event.is_valid():
+                    break
+                result['events'].append(dict(id=event.event_id, data=event.data, message=event.string))
+        except Exception as exc:
+            result['events_read_error'] = str(exc)
+        log_transaction('pump', 'diagnostics', response=result, evidence_stage='OBSERVED')
+        self.diagnostic_history.append(result)
+        del self.diagnostic_history[:-16]
+        return result
+
+    def recover_fault(self) -> dict:
+        """Explicit stop/clear with bounded acknowledgement; never force-enable a fault."""
+        before = self.diagnostics()
+        self.stop()
+        pump = self._require_pump()
+        pump.clear_fault()
+        expires = time.monotonic() + 1
+        while pump.is_in_fault_state() and time.monotonic() < expires:
+            time.sleep(0.05)
+        if pump.is_in_fault_state():
+            self.last_diagnostics = self.diagnostics()
+            raise CetoniPumpError('Fault persists after clear; drive was not enabled. '
+                                  'Inspect pump mechanics/fluid routing and vendor diagnostics before reconnecting.')
+        self._require_position_sensing_initialized_before_enable()
+        self._enable_pump()
+        self.stop()
+        return {'before': before, 'after': self.diagnostics()}
 
     def read_syringe(self) -> tuple[float, float]:
         diameter, stroke = self._require_pump().get_syringe_param()
