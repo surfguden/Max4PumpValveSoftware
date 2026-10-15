@@ -8,6 +8,7 @@ import json
 import logging
 import threading
 import uuid
+from pathlib import Path
 from .application import Application, Syringe
 from .storage import data_dir, load, save, VERSION
 
@@ -275,10 +276,14 @@ class Commands:
                 a.start(index=pump-1, command_id=request_id, **args)
             return {'started': True, 'completion': 'Observe helper.state events', 'command_id': request_id}
         if command == 'settings.load':
-            if args:
-                raise ValueError('settings.load accepts no arguments')
-            loaded = load()
+            if set(args) - {'path'} or ('path' in args and not isinstance(args['path'], str)):
+                raise ValueError('settings.load accepts an optional file path')
+            if args.get('path') and not Path(args['path']).is_file():
+                raise ValueError('Selected settings file does not exist')
+            loaded = load(args.get('path'))
             with self.lock:
+                if args.get('path'):
+                    save(loaded)
                 self.settings = loaded
             if not self.app.valves:
                 from .drivers.valve_session import DetectedUnit

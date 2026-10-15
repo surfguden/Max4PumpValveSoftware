@@ -9,6 +9,11 @@ Use shutdown to end the owner. See TERMINAL.md for complete examples and JSON.
 All interfaces use exactly the same application commands and device reservations.
 
 Extract the entire ZIP, then launch Max4PumpValve.exe. Keep _internal beside it.
+The File menu contains Save settings, Load settings and Connection settings.
+Save/Load opens a JSON file dialog and confirms the selected file on success.
+Connection settings holds the SDK/configuration paths and number of units.
+Device pages use tabs and the helper panels sit side by side, without vertical
+scrollbars. Disabled action buttons explain their requirements in tooltips.
 Requires Windows 10 version 1903 or newer, x64 (Windows 11 recommended).
 Python, pip and a source checkout are not required. The application always starts
 disconnected. It never restores motion or automatically connects saved devices.
@@ -50,8 +55,13 @@ Nothing references or resumes at startup. Syringe profiles are remembered but
 must be applied explicitly after connecting; they are never silently reapplied.
 
 HELPERS
-Stirring performs one cycle: map/verify Cetoni valve, empty to the configured
-minimum, wait for idle, refill to the chosen level, wait for idle, then de-energize.
+Stirring performs one cycle: set the selected beginning valve state, empty to the
+configured minimum, wait for idle, wait the configured time after emptying,
+refill to the chosen level, wait for idle, wait the configured time after full /
+refill, then set the selected ending valve state. Both states have Energized /
+Not energized choices, using the pump's explicit valve-position mapping.
+Wait defaults are zero seconds. Stop, fault checks and the overall sequence
+deadline remain active throughout waits; later transitions are skipped on error.
 The helper polls the SDK is_pumping flag at approximately 50 ms intervals and
 checks faults and zero flow before continuing. Fill readings show progress;
 stirring never advances or fails because a volume threshold was crossed or missed.
@@ -68,13 +78,16 @@ call quarantines that bus; a stop is queued with priority, but remains unverifie
 until the call returns. Resolve hardware state before restarting the application.
 
 SETTINGS AND LOGS
-Save all settings remembers connection paths, COM settings, valve names, syringe
+File > Save settings remembers connection paths, COM settings, valve names, syringe
 profiles and pump assignments, pump mode/volume/flow/level and valve mappings,
 helper selections/parameters/deadline, pump count, selected tab and window size.
-Load settings restores those saved controls without connecting or moving devices.
+File > Load settings restores those saved controls without connecting or moving devices.
 Profiles must still be applied explicitly after connecting. Data and logs go to
 %LOCALAPPDATA%\Max4PumpValve, never to the extracted distribution.
 PUMPVALVE_DATA_DIR can override this location for controlled testing.
+Connecting pumps attempts to clear faults on every discovered module and verifies
+fault state, position sensing and drive enable. A persistent fault or invalid
+position sensing prevents connection. Connection never performs a reference move.
 
 VERIFICATION
 sdk-import-verification.json checks that the packaged Qmix DLL loader imports

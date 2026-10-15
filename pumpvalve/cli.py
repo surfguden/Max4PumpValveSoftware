@@ -73,6 +73,10 @@ def parser():
         hp.add_argument('--deadline', type=float, default=120)
         if kind == 'stir':
             hp.add_argument('--refill', choices=['Full syringe', 'Defined volume', 'Volume before emptying'], default='Full syringe')
+            hp.add_argument('--wait-empty', type=float, default=0, help='Idle wait after emptying, seconds')
+            hp.add_argument('--wait-full', type=float, default=0, help='Idle wait after refilling, seconds')
+            hp.add_argument('--valve-begin', choices=['Energized', 'Not energized'], default='Energized')
+            hp.add_argument('--valve-end', choices=['Energized', 'Not energized'], default='Not energized')
         else:
             hp.add_argument('--address', type=int, required=True)
             hp.add_argument('--before', choices=['input', 'output', 'bypass', 'extra'], required=True)

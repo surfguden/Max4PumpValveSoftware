@@ -125,12 +125,18 @@ physical switch integers 0–14, not DT wire addresses. Volumes are mL; rates ar
 
 `settings.save` accepts config/sdk/port/baud/valves/syringes/pump_profiles/ui using the
 settings schema. Syringe commands save the profile after a successful application.
-`settings.load` accepts no arguments and reloads the saved settings file.
+`settings.load` accepts no arguments for the per-user file, or `{"path":"C:/settings.json"}`
+to import a selected settings file. Imported settings are validated before use.
+Stirring accepts `wait_empty` and `wait_full` in seconds (0–3600, default zero),
+and `valve_begin` / `valve_end` as `Energized` or `Not energized`. CLI equivalents
+are `--wait-empty`, `--wait-full`, `--valve-begin` and `--valve-end`.
+The sequence deadline includes motion and both cancellable, fault-monitored waits.
 No saved profile or configuration triggers automatic connection or motion.
 
 ## Hardware authorization
 
-Simulation is the default for every connect command. Real connection is explicit:
+Connections use real hardware in normal operation. Simulation is disabled.
+These commands explicitly select hardware paths and serial settings:
 
 ```powershell
 ./Max4PumpValveCtl.exe pumps connect --hardware --configuration 'C:\Qmix configuration' --sdk 'C:\CETONI SDK'

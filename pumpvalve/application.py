@@ -369,13 +369,19 @@ class Application:
                                 priority=0, recovery=True)
 
     def start(self, kind, index, *, rate=None, refill='Full syringe', volume=0,
-              address=None, before='input', after='output', deadline=120, command_id=None):
+              address=None, before='input', after='output', deadline=120, command_id=None,
+              wait_full=0, wait_empty=0, valve_begin='Energized', valve_end='Not energized'):
         keys = [('pump', index)] + ([('serial', 0)] if kind == 'inject' else [])
         if kind not in ('stir', 'inject'):
             raise ValueError('Unknown helper')
         deadline = finite(deadline, 'Operation deadline')
         if not 0 < deadline <= 3600:
             raise ValueError('Deadline must be within 0–3600 seconds')
+        wait_full, wait_empty = finite(wait_full, 'Full wait'), finite(wait_empty, 'Empty wait')
+        if not 0 <= wait_full <= 3600 or not 0 <= wait_empty <= 3600:
+            raise ValueError('Wait times must be within 0–3600 seconds')
+        if valve_begin not in ('Energized', 'Not energized') or valve_end not in ('Energized', 'Not energized'):
+            raise ValueError('Choose Energized or Not energized for cycle valve states')
         with self.lock:
             if self.state['running']:
                 raise RuntimeError('A helper is already running')
@@ -399,16 +405,20 @@ class Application:
                     if refill not in ('Full syringe', 'Volume before emptying', 'Defined volume'):
                         raise ValueError('Invalid refill target')
                     target = self._target(state, target)
-                    self._publish(step='Energizing Cetoni valve', remaining=initial)
-                    observed = self._pump_call(lambda: self.pumps.set_valve_position(index, mapping[0]), expires)
-                    if observed != mapping[0]:
-                        raise RuntimeError('Energized position unverified')
+                    begin_position = mapping[0 if valve_begin == 'Energized' else 1]
+                    end_position = mapping[0 if valve_end == 'Energized' else 1]
+                    self._publish(step=f'Setting beginning valve: {valve_begin}', remaining=initial)
+                    observed = self._pump_call(lambda: self.pumps.set_valve_position(index, begin_position), expires)
+                    if observed != begin_position:
+                        raise RuntimeError('Beginning valve position unverified')
                     self._dose(index, initial, state['minimum'], flow, expires, 'Emptying', verify_target=False)
+                    self._dwell(index, wait_empty, expires, 'Waiting after empty')
                     self._dose(index, state['minimum'], target, flow, expires, 'Refilling', verify_target=False)
-                    self._publish(step='De-energizing Cetoni valve')
-                    observed = self._pump_call(lambda: self.pumps.set_valve_position(index, mapping[1]), expires)
-                    if observed != mapping[1]:
-                        raise RuntimeError('De-energized position unverified')
+                    self._dwell(index, wait_full, expires, 'Waiting after full')
+                    self._publish(step=f'Setting ending valve: {valve_end}')
+                    observed = self._pump_call(lambda: self.pumps.set_valve_position(index, end_position), expires)
+                    if observed != end_position:
+                        raise RuntimeError('Ending valve position unverified')
                 else:
                     volume_value = finite(volume, 'Injection volume')
                     if volume_value <= 0:
@@ -465,6 +475,25 @@ class Application:
         result = self.serial.call(lambda: (self._check(expires), action())[1], timeout=min(13, max(0.001, expires-time.monotonic())))
         self._check(expires)
         return result
+
+    def _dwell(self, index, seconds, expires, step):
+        if not seconds:
+            return
+        end = time.monotonic() + seconds
+        self._publish(step=step)
+        while True:
+            self._check(expires)
+            def verify_idle():
+                if self.pumps.read_fault(index):
+                    raise RuntimeError('Pump fault during wait')
+                if self.pumps.read_status(index) or abs(self.pumps.read_flow(index)) > 1e-6:
+                    raise RuntimeError('Pump no longer idle during wait')
+            self._pump_call(verify_idle, expires)
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                return
+            if self.cancel.wait(min(0.05, remaining)):
+                raise Cancelled('Sequence cancelled during wait')
 
     def _dose(self, index, initial, target, flow, expires, step, verify_target=True):
         self._publish(step=step)

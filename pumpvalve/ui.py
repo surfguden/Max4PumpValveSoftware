@@ -4,14 +4,14 @@ import math
 import json
 from dataclasses import asdict
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
-from PySide6.QtGui import QPainter, QColor, QLinearGradient, QPen
+from PySide6.QtGui import QPainter, QColor, QLinearGradient, QPen, QAction, QGuiApplication, QFont
 from PySide6.QtWidgets import (QMainWindow, QWidget, QTabWidget, QVBoxLayout,
     QHBoxLayout, QFormLayout, QLabel, QPushButton, QComboBox, QDoubleSpinBox,
-    QSpinBox, QLineEdit, QFileDialog, QGroupBox, QScrollArea, QDialog,
+    QSpinBox, QLineEdit, QFileDialog, QGroupBox, QDialog, QMessageBox,
     QDialogButtonBox, QProgressBar, QCheckBox)
 from .application import Syringe
 from .drivers.valve_session import VALVE_TYPES, DetectedUnit
-from .storage import VERSION, test_simulation_enabled
+from .storage import VERSION, test_simulation_enabled, data_dir, save
 from .drivers.cetoni import SYRINGE_PRESETS
 
 
@@ -31,8 +31,17 @@ def number(value=0, minimum=0, maximum=1_000_000, decimals=4):
 def button(text, callback, layout):
     control = QPushButton(text)
     control.clicked.connect(callback)
+    control.setAttribute(Qt.WA_AlwaysShowToolTips, True)
     layout.addWidget(control)
     return control
+
+
+def availability(control, reason=''):
+    """Keep a useful explanation on disabled controls, including action buttons."""
+    if control.isEnabled() and reason:
+        control.setProperty('available_tooltip', control.toolTip())
+    control.setEnabled(not bool(reason))
+    control.setToolTip(reason or control.property('available_tooltip') or '')
 
 
 def combo(items):
@@ -48,7 +57,7 @@ class Bridge(QObject):
 class SyringeView(QWidget):
     def __init__(self):
         super().__init__()
-        self.setMinimumSize(115, 390)
+        self.setMinimumSize(115, 300)
         self.state = {}
 
     def paintEvent(self, event):
@@ -209,13 +218,13 @@ class PumpCard(QGroupBox):
     def __init__(self, window, index):
         super().__init__(f'neMESYS · Pump {index+1}')
         self.window, self.index = window, index
-        self.setFixedWidth(395)
+        self.device_buttons = []
         root = QVBoxLayout(self)
         self.status = QLabel('Disconnected')
         root.addWidget(self.status)
         row = QHBoxLayout()
-        button('▶ Start', self.start, row)
-        button('■ Stop', lambda: window.stop_pump(index), row)
+        self.device_buttons.append(button('▶ Start', self.start, row))
+        self.stop_button = button('■ Stop', lambda: window.stop_pump(index), row)
         self.motion_rates = dict(refill=1000, empty=1000)
         self.motion_buttons = {}
         for mode, text in [('refill', '↑ Refill'), ('empty', '↓ Empty')]:
@@ -223,6 +232,7 @@ class PumpCard(QGroupBox):
             control.setContextMenuPolicy(Qt.CustomContextMenu)
             control.customContextMenuRequested.connect(lambda position, m=mode: self.edit_motion_rate(m))
             self.motion_buttons[mode] = control
+            self.device_buttons.append(control)
         self.update_motion_tooltips()
         root.addLayout(row)
         body = QHBoxLayout()
@@ -231,7 +241,6 @@ class PumpCard(QGroupBox):
         right = QVBoxLayout()
         target = QGroupBox('Target')
         form = QFormLayout(target)
-        form.setRowWrapPolicy(QFormLayout.WrapAllRows)
         self.mode = combo(['Volume', 'Flow', 'Syringe level'])
         self.volume = number(0.1, -1000, 1000)
         self.flow = number(1000, -1_000_000, 1_000_000, 2)
@@ -252,30 +261,56 @@ class PumpCard(QGroupBox):
         self.limits.setWordWrap(True)
         right.addWidget(self.limits)
         body.addLayout(right)
-        root.addLayout(body)
+        tools = QVBoxLayout()
         row = QHBoxLayout()
-        button('Configure syringe…', self.configure, row)
-        button('Reference move', lambda: self.command('reference'), row)
-        root.addLayout(row)
+        self.device_buttons.append(button('Configure syringe…', self.configure, row))
+        self.device_buttons.append(button('Reference move', lambda: self.command('reference'), row))
+        tools.addLayout(row)
         row = QHBoxLayout()
-        button('Valve 1', lambda: self.command('valve', 1), row)
-        button('Valve 2', lambda: self.command('valve', 2), row)
-        root.addLayout(row)
+        self.valve_buttons = [button('Valve 1', lambda: self.command('valve', 1), row),
+                              button('Valve 2', lambda: self.command('valve', 2), row)]
+        self.device_buttons.extend(self.valve_buttons)
+        tools.addLayout(row)
         mapping = QFormLayout()
         self.energized = combo(['Unmapped', 'Position 1', 'Position 2'])
         self.deenergized = combo(['Unmapped', 'Position 1', 'Position 2'])
         mapping.addRow('Energized', self.energized)
         mapping.addRow('De-energized', self.deenergized)
-        root.addLayout(mapping)
-        button('Apply valve mapping', self.map, root)
+        tools.addLayout(mapping)
+        self.map_button = button('Apply valve mapping', self.map, tools)
+        self.device_buttons.append(self.map_button)
+        tools.addStretch()
+        body.addLayout(tools)
+        root.addLayout(body)
+        root.addStretch()
+        self.connected = bool(window.app.pumps)
         self.initial = None
         self.last_mapping = None
         self.mode.currentIndexChanged.connect(self.mode_changed)
         self.mode_changed()
+        self.refresh_availability()
+
+    def refresh_availability(self):
+        state = self.syringe.state
+        app = self.window.app
+        reason = ('Connect pumps first using Connect pumps.' if not app.pumps else
+                  'The pump bus is unresponsive; resolve hardware state before reconnecting.' if app.qmix.stalled else
+                  'This pump is reserved by an active operation.' if ('pump', self.index) in app.reserved else
+                  'Waiting for verified pump status.' if not state else
+                  'Pump reports a fault; disconnect and reconnect to attempt fault recovery.' if state.get('fault') else
+                  'Stop the pump before starting another operation.' if state.get('pumping') else '')
+        for control in self.device_buttons:
+            availability(control, reason)
+        if not reason and state.get('valve') not in (1, 2):
+            for control in [*self.valve_buttons, self.map_button]:
+                availability(control, 'This pump has no supported two-position valve.')
+        availability(self.stop_button, '' if app.pumps else 'Connect pumps before requesting a stop.')
 
     def mode_changed(self):
         self.volume.setEnabled(self.mode.currentIndex() == 0)
         self.level.setEnabled(self.mode.currentIndex() == 2)
+        self.volume.setToolTip('Select Volume mode to edit dosing volume.' if not self.volume.isEnabled() else '')
+        self.level.setToolTip('Select Syringe level mode to edit the target level.' if not self.level.isEnabled() else '')
 
     def start(self):
         mode = ['volume', 'flow', 'level'][self.mode.currentIndex()]
@@ -293,6 +328,7 @@ class PumpCard(QGroupBox):
             rate = self.motion_rates[mode]
             text = 'Max (current device limit)' if rate == 'max' else f'{rate:g} µL/min'
             control.setToolTip(f'{mode.capitalize()}: {text}\nRight-click to set flow rate')
+            control.setProperty('available_tooltip', control.toolTip())
 
     def edit_motion_rate(self, mode):
         dialog = MotionRateDialog(mode, self.motion_rates[mode], self.syringe.state.get('max_flow'), self)
@@ -340,21 +376,31 @@ class MainWindow(QMainWindow):
         self.last_units = None
         self.settings = {}
         self.setWindowTitle(f'Max4 Pump & Valve · {VERSION}')
-        self.resize(1240, 920)
+        self.setAttribute(Qt.WA_AlwaysShowToolTips, True)
+        self.setFont(QFont('Segoe UI', 9))
+        self.resize(1240, 680)
+        self.setMinimumSize(960, 560)
         root = QWidget()
         layout = QVBoxLayout(root)
-        title = QLabel('MAX4  /  PUMP & VALVE CONTROL')
-        title.setStyleSheet('font-size:20px; font-weight:600; padding:8px;')
-        layout.addWidget(title)
-        settings_row = QHBoxLayout()
-        self.save_settings_button = button('Save all settings', self.persist, settings_row)
-        self.load_settings_button = button('Load settings', self.load_settings, settings_row)
-        settings_row.addStretch()
-        layout.addLayout(settings_row)
+        file_menu = self.menuBar().addMenu('&File')
+        self.save_settings_action = QAction('&Save settings…', self)
+        self.save_settings_action.setShortcut('Ctrl+S')
+        self.save_settings_action.triggered.connect(self.save_settings_file)
+        file_menu.addAction(self.save_settings_action)
+        self.load_settings_action = QAction('&Load settings…', self)
+        self.load_settings_action.setShortcut('Ctrl+O')
+        self.load_settings_action.triggered.connect(self.load_settings_file)
+        file_menu.addAction(self.load_settings_action)
+        file_menu.addSeparator()
+        self.connection_action = file_menu.addAction('Connection settings…', self.edit_connection_settings)
+        file_menu.addSeparator()
+        file_menu.addAction('Exit', self.close)
+        self.settings_filename = str(data_dir() / 'settings.json')
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
         self.message = QLabel('Disconnected · Hardware mode. Connect devices explicitly.')
         self.message.setWordWrap(True)
+        self.message.setMaximumHeight(40)
         layout.addWidget(self.message)
         self.setCentralWidget(root)
         try:
@@ -371,14 +417,59 @@ class MainWindow(QMainWindow):
         self.setStyleSheet('''QMainWindow,QWidget { background:#202a31; color:#e3edf2; }
           QGroupBox { border:1px solid #4a606c; border-radius:5px; margin-top:14px; padding:10px; }
           QGroupBox::title { subcontrol-origin:margin; left:12px; }
-          QPushButton { background:#365668; border:1px solid #52798d; border-radius:4px; padding:7px; }
+          QPushButton { background:#365668; border:1px solid #52798d; border-radius:4px; padding:4px; }
           QPushButton:hover { background:#47768b; } QPushButton:disabled { color:#788a93; }
-          QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox { background:#162028; border:1px solid #49606d; padding:5px; }
-          QTabBar::tab { padding:10px 20px; } QTabBar::tab:selected { background:#365668; }
+          QLineEdit,QComboBox,QDoubleSpinBox,QSpinBox { background:#162028; border:1px solid #49606d; padding:3px; }
+          QTabBar::tab { padding:6px 14px; } QTabBar::tab:selected { background:#365668; }
           QProgressBar { border:1px solid #52798d; text-align:center; } QProgressBar::chunk { background:#299eb0; }''')
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(250)
+        self.fit_screen()
+
+    def fit_screen(self):
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen:
+            available = screen.availableGeometry()
+            self.resize(min(self.width(), max(960, available.width()-24)),
+                        min(self.height(), max(560, available.height()-60)))
+
+    def save_settings_file(self):
+        path, _ = QFileDialog.getSaveFileName(self, 'Save all settings', self.settings_filename, 'Settings (*.json)')
+        if not path:
+            return
+        if not path.lower().endswith('.json'):
+            path += '.json'
+        try:
+            if not self.persist():
+                raise ValueError(self.message.text())
+            save(self.settings, path)
+            self.settings_filename = path
+            self.statusBar().showMessage(f'Settings saved: {path}', 15000)
+            QMessageBox.information(self, 'Settings saved', f'All settings saved to:\n{path}')
+        except Exception as exc:
+            QMessageBox.critical(self, 'Settings save failed', str(exc))
+
+    def load_settings_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, 'Load settings', self.settings_filename, 'Settings (*.json)')
+        if not path:
+            return
+        if self.load_settings(path):
+            self.settings_filename = path
+            self.statusBar().showMessage(f'Settings loaded: {path}', 15000)
+            QMessageBox.information(self, 'Settings loaded', f'Settings loaded from:\n{path}\nNo devices were connected or moved.')
+        else:
+            QMessageBox.critical(self, 'Settings load failed', self.message.text())
+
+    def edit_connection_settings(self):
+        previous = self.config.text(), self.sdk.text(), self.count.value()
+        if self.connection_dialog.exec() == QDialog.Accepted:
+            self.persist()
+            self.statusBar().showMessage('Connection settings saved for the next connection.', 10000)
+        else:
+            self.config.setText(previous[0])
+            self.sdk.setText(previous[1])
+            self.count.setValue(previous[2])
 
     def issue(self, command, args=None, done=None, *, quiet=False):
         def execute():
@@ -428,7 +519,9 @@ class MainWindow(QMainWindow):
             refill_volume=self.refill_volume.value(), inject_pump=self.inject_pump.currentIndex() if self.inject_pump.currentIndex() >= 0 else previous.get('inject_pump', 0),
             inject_valve=self.inject_valve.currentData() if self.inject_valve.currentData() is not None else previous.get('inject_valve'), inject_volume=self.inject_volume.value(),
             inject_rate=self.inject_rate.value(), before=self.before.currentData() or previous.get('before'),
-            after=self.after.currentData() or previous.get('after'), deadline=self.deadline.value()))
+            after=self.after.currentData() or previous.get('after'), deadline=self.deadline.value(),
+            wait_empty=self.wait_empty.value(), wait_full=self.wait_full.value(),
+            valve_begin=self.valve_begin.currentText(), valve_end=self.valve_end.currentText()))
         saved['ui'] = ui
         try:
             response = self.commands.execute('settings.save', saved, source='gui')
@@ -437,8 +530,10 @@ class MainWindow(QMainWindow):
             self.settings = json_copy(response['result'])
             self.last_settings = json_copy(self.settings)
             self.message.setText('All settings saved')
+            return True
         except Exception as exc:
             self.message.setText(f'Settings save failed: {exc}')
+            return False
 
     def capture_pump_controls(self):
         pumps = self.settings.setdefault('ui', {}).setdefault('pumps', {})
@@ -475,12 +570,13 @@ class MainWindow(QMainWindow):
             self.set_cards(self.count.value(), capture=False)
         self.restore_pump_controls()
         helpers = ui.get('helpers', {})
-        for key, control in [('speed', self.speed), ('refill', self.refill)]:
+        for key, control in [('speed', self.speed), ('refill', self.refill),
+                             ('valve_begin', self.valve_begin), ('valve_end', self.valve_end)]:
             if key in helpers:
                 control.setCurrentText(helpers[key])
         for key, control in [('stir_rate', self.stir_rate), ('refill_volume', self.refill_volume),
                              ('inject_volume', self.inject_volume), ('inject_rate', self.inject_rate),
-                             ('deadline', self.deadline)]:
+                             ('deadline', self.deadline), ('wait_full', self.wait_full), ('wait_empty', self.wait_empty)]:
             if key in helpers:
                 control.setValue(helpers[key])
         for key, control in [('stir_pump', self.stir_pump), ('inject_pump', self.inject_pump)]:
@@ -488,6 +584,7 @@ class MainWindow(QMainWindow):
         self.restore_valve_choices()
         if 'window_size' in ui:
             self.resize(*ui['window_size'])
+            self.fit_screen()
         self.tabs.setCurrentIndex(ui.get('tab', 0))
         self.pump_sim.setChecked(False)
         self.valve_sim.setChecked(False)
@@ -503,16 +600,17 @@ class MainWindow(QMainWindow):
             if index >= 0:
                 control.setCurrentIndex(index)
 
-    def load_settings(self):
-        response = self.commands.execute('settings.load', source='gui')
+    def load_settings(self, path=None):
+        response = self.commands.execute('settings.load', dict(path=path) if path else {}, source='gui')
         if not response['ok']:
             self.message.setText(f'Settings load failed: {response["error"]}')
-            return
+            return False
         self.settings = json_copy(response['result'])
         self.last_settings = json_copy(self.settings)
         self.restore_controls()
         self.last_units = None
         self.message.setText('All settings loaded · No device commands were sent')
+        return True
 
     def browse(self, target):
         path = QFileDialog.getExistingDirectory(self, 'Select folder', target.text())
@@ -522,6 +620,9 @@ class MainWindow(QMainWindow):
     def build_pumps(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        self.connection_dialog = QDialog(self)
+        self.connection_dialog.setWindowTitle('Connection settings')
+        dialog_layout = QVBoxLayout(self.connection_dialog)
         form = QFormLayout()
         self.pump_sim = QCheckBox('Simulation (no hardware)')
         self.pump_sim.setChecked(False)
@@ -537,33 +638,33 @@ class MainWindow(QMainWindow):
             row.addWidget(target)
             button('Browse…', lambda checked=False, t=target: self.browse(t), row)
             form.addRow(label, row)
-        form.addRow(self.pump_sim, self.count)
-        layout.addLayout(form)
+        form.addRow('Number of units', self.count)
+        dialog_layout.addLayout(form)
+        dialog_layout.addWidget(QLabel('Hardware units are discovered from the Qmix configuration.\nSDK changes may require restarting the application.'))
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.connection_dialog.accept)
+        buttons.rejected.connect(self.connection_dialog.reject)
+        dialog_layout.addWidget(buttons)
         row = QHBoxLayout()
+        row.addWidget(self.pump_sim)
         self.pump_connect = button('Connect pumps', self.connect_pumps, row)
-        button('Disconnect pumps', lambda: self.issue('pumps.disconnect', done=lambda _: self.set_cards(0)), row)
-        button('Save settings', self.persist, row)
+        self.pump_disconnect = button('Disconnect pumps', lambda: self.issue('pumps.disconnect', done=lambda _: self.set_cards(self.count.value())), row)
+        row.addStretch()
         layout.addLayout(row)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        self.pump_layout = QHBoxLayout(content)
-        self.pump_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        scroll.setWidget(content)
-        layout.addWidget(scroll)
+        self.pump_pages = QTabWidget()
+        layout.addWidget(self.pump_pages)
         self.tabs.addTab(tab, 'Cetoni Pumps')
         self.set_cards(self.count.value())
 
     def set_cards(self, count, capture=True):
         if capture:
             self.capture_pump_controls()
+        self.pump_pages.clear()
         for card in self.cards:
-            self.pump_layout.removeWidget(card)
             card.deleteLater()
         self.cards = [PumpCard(self, i) for i in range(count)]
         for card in self.cards:
-            self.pump_layout.addWidget(card)
-            card.setEnabled(bool(self.app.pumps))
+            self.pump_pages.addTab(card, f'Pump {card.index+1}')
         if hasattr(self, 'stir_pump'):
             for key, c in (('stir_pump', self.stir_pump), ('inject_pump', self.inject_pump)):
                 c.clear()
@@ -575,7 +676,7 @@ class MainWindow(QMainWindow):
 
     def connect_pumps(self):
         simulation, count, config, sdk = self.pump_sim.isChecked(), self.count.value(), self.config.text(), self.sdk.text()
-        self.pump_connect.setEnabled(False)
+        availability(self.pump_connect, 'Connecting pumps and checking fault recovery. Please wait.')
         self.persist()
         def done(n):
             self.set_cards(n)
@@ -603,18 +704,13 @@ class MainWindow(QMainWindow):
         row.addWidget(self.baud)
         layout.addLayout(row)
         row = QHBoxLayout()
-        button('Connect & Scan', self.connect_valves, row)
-        button('Scan bus', lambda: self.issue('valves.scan', done=self.show_valves), row)
-        button('Disconnect valves', lambda: self.issue('valves.disconnect', done=lambda _: self.show_valves(list(self.app.units.values()))), row)
-        button('Save configuration', self.persist, row)
+        self.valve_connect = button('Connect & Scan', self.connect_valves, row)
+        self.valve_scan = button('Scan bus', lambda: self.issue('valves.scan', done=self.show_valves), row)
+        self.valve_disconnect = button('Disconnect valves', lambda: self.issue('valves.disconnect', done=lambda _: self.show_valves(list(self.app.units.values()))), row)
+        row.addStretch()
         layout.addLayout(row)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        self.valve_layout = QVBoxLayout(content)
-        self.valve_layout.setAlignment(Qt.AlignTop)
-        scroll.setWidget(content)
-        layout.addWidget(scroll)
+        self.valve_pages = QTabWidget()
+        layout.addWidget(self.valve_pages)
         self.tabs.addTab(tab, 'TriContinent Valves')
         self.names = {v['address']: v['name'] for v in self.settings.get('valves', [])}
         self.valve_cards = []
@@ -635,8 +731,8 @@ class MainWindow(QMainWindow):
 
     def show_valves(self, units):
         units = [DetectedUnit(**u) if isinstance(u, dict) else u for u in units]
+        self.valve_pages.clear()
         for card in self.valve_cards:
-            self.valve_layout.removeWidget(card)
             card.deleteLater()
         self.valve_cards = []
         for unit in units:
@@ -653,10 +749,13 @@ class MainWindow(QMainWindow):
             row = QHBoxLayout()
             for position in VALVE_TYPES[unit.valve_type]:
                 b = button(f'{position.title()} ({position[0].upper()})', lambda checked=False, a=unit.address, p=position: self.issue('valve.move', dict(address=a, position=p)), row)
-                b.setEnabled(not unit.error and bool(self.app.valves))
-            button('Query / Identify', lambda checked=False, a=unit.address: self.issue('valve.query', dict(address=a)), row)
+                availability(b, 'Connect valves first.' if not self.app.valves else
+                             f'Valve identification/status must be verified: {unit.error}' if unit.error else '')
+            b = button('Query / Identify', lambda checked=False, a=unit.address: self.issue('valve.query', dict(address=a)), row)
+            availability(b, '' if self.app.valves else 'Connect valves before querying device identification.')
             layout.addLayout(row)
-            self.valve_layout.addWidget(card)
+            layout.addStretch()
+            self.valve_pages.addTab(card, self.names[unit.address])
             self.valve_cards.append(card)
         if hasattr(self, 'inject_valve'):
             old = self.inject_valve.currentData()
@@ -671,6 +770,8 @@ class MainWindow(QMainWindow):
     def build_helpers(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        groups = QHBoxLayout()
+        layout.addLayout(groups)
         stir = QGroupBox('Stirring Cycle · One cycle per Start')
         form = QFormLayout(stir)
         self.stir_pump = combo([f'Pump {i+1}' for i in range(len(self.cards))])
@@ -678,19 +779,35 @@ class MainWindow(QMainWindow):
         self.stir_rate = number(1000, 0.01)
         self.refill = combo(['Full syringe', 'Defined volume', 'Volume before emptying'])
         self.refill_volume = number(0.5)
+        self.speed.currentIndexChanged.connect(lambda: availability(self.stir_rate,
+            'Full speed uses the device maximum; select Defined flow rate to enter a rate.' if self.speed.currentIndex() == 0 else ''))
+        self.refill.currentIndexChanged.connect(lambda: availability(self.refill_volume,
+            'Select Defined volume to enter a refill level.' if self.refill.currentText() != 'Defined volume' else ''))
+        availability(self.stir_rate, 'Full speed uses the device maximum; select Defined flow rate to enter a rate.')
+        availability(self.refill_volume, 'Select Defined volume to enter a refill level.')
+        self.wait_empty = number(0, 0, 3600, 2)
+        self.wait_full = number(0, 0, 3600, 2)
+        self.valve_begin = combo(['Energized', 'Not energized'])
+        self.valve_end = combo(['Energized', 'Not energized'])
+        self.valve_end.setCurrentText('Not energized')
         form.addRow('Pump', self.stir_pump)
         form.addRow('Speed mode', self.speed)
         form.addRow('Defined flow (µL/min)', self.stir_rate)
         form.addRow('Refill target', self.refill)
         form.addRow('Defined refill level (mL)', self.refill_volume)
+        form.addRow('Wait after empty (s)', self.wait_empty)
+        form.addRow('Wait after full / refill (s)', self.wait_full)
+        form.addRow('Valve at beginning', self.valve_begin)
+        form.addRow('Valve at end', self.valve_end)
         row = QHBoxLayout()
         self.stir_start = button('Start cycle', self.start_stir, row)
-        button('Stop', lambda: self.issue('helper.stop'), row)
+        self.stir_stop = button('Stop', lambda: self.issue('helper.stop'), row)
         form.addRow(row)
         self.stir_status = QLabel('Idle')
         self.stir_status.setWordWrap(True)
         form.addRow(self.stir_status)
-        layout.addWidget(stir)
+        self.stir_status.setMaximumHeight(45)
+        groups.addWidget(stir)
         inject = QGroupBox('Inject Volume and Stop Flow')
         form = QFormLayout(inject)
         self.inject_pump = combo([f'Pump {i+1}' for i in range(len(self.cards))])
@@ -705,12 +822,13 @@ class MainWindow(QMainWindow):
         self.inject_valve.currentIndexChanged.connect(self.valve_choices)
         row = QHBoxLayout()
         self.inject_start = button('Start injection', self.start_inject, row)
-        button('Stop', lambda: self.issue('helper.stop'), row)
+        self.inject_stop = button('Stop', lambda: self.issue('helper.stop'), row)
         form.addRow(row)
         self.inject_status = QLabel('Idle')
         self.inject_status.setWordWrap(True)
         form.addRow(self.inject_status)
-        layout.addWidget(inject)
+        self.inject_status.setMaximumHeight(45)
+        groups.addWidget(inject)
         self.deadline = number(120, 1, 3600, 0)
         row = QHBoxLayout()
         row.addWidget(QLabel('Maximum sequence duration (seconds)'))
@@ -718,16 +836,14 @@ class MainWindow(QMainWindow):
         layout.addLayout(row)
         self.helper_status = QLabel('Idle')
         self.helper_status.setWordWrap(True)
+        self.helper_status.setMaximumHeight(42)
         self.helper_values = QLabel('Injected: —   Remaining: —')
         self.progress = QProgressBar()
         layout.addWidget(self.helper_status)
         layout.addWidget(self.helper_values)
         layout.addWidget(self.progress)
         layout.addStretch()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(tab)
-        self.tabs.addTab(scroll, 'Experimental Helpers')
+        self.tabs.addTab(tab, 'Experimental Helpers')
 
     def valve_choices(self, *args):
         unit = self.app.units.get(self.inject_valve.currentData())
@@ -743,7 +859,9 @@ class MainWindow(QMainWindow):
         try:
             self.issue('helper.start', dict(kind='stir', pump=self.stir_pump.currentIndex()+1,
                 rate=None if self.speed.currentIndex() == 0 else self.stir_rate.value(),
-                refill=self.refill.currentText(), volume=self.refill_volume.value(), deadline=self.deadline.value()))
+                refill=self.refill.currentText(), volume=self.refill_volume.value(), deadline=self.deadline.value(),
+                wait_empty=self.wait_empty.value(), wait_full=self.wait_full.value(),
+                valve_begin=self.valve_begin.currentText(), valve_end=self.valve_end.currentText()))
         except Exception as exc:
             self.message.setText(str(exc))
 
@@ -774,11 +892,12 @@ class MainWindow(QMainWindow):
         # Device-count metadata is in memory; do not replace a fresh UI selection
         # with an older cached disconnected snapshot.
         count = self.app.pumps.unit_count if self.app.pumps else 0
-        if count and (len(self.cards) != count or not self.cards or not self.cards[0].isEnabled()):
+        if count and (len(self.cards) != count or not self.cards or not self.cards[0].connected):
             self.set_cards(count)
-        elif not count and self.cards and self.cards[0].isEnabled():
-            self.set_cards(0)
+        elif not count and self.cards and self.cards[0].connected:
+            self.set_cards(self.count.value())
         for card in self.cards:
+            card.refresh_availability()
             mapping = cached.get('mapping', {}).get(str(card.index+1))
             if mapping and mapping != card.last_mapping:
                 card.last_mapping = mapping
@@ -809,9 +928,32 @@ class MainWindow(QMainWindow):
         self.helper_status.setText(f'{"● RUNNING" if state["running"] else "● STOPPED"} · {state["step"]}\n{state["message"]}')
         self.helper_values.setText(f'Injected / moved: {state.get("injected", 0):.4f} mL   Remaining: {state.get("remaining", 0):.4f} mL')
         self.progress.setValue(int(state['progress']))
-        self.stir_start.setEnabled(not state['running'] and self.stir_pump.currentIndex() in self.app.mapping and bool(self.app.pumps))
-        self.inject_start.setEnabled(not state['running'] and bool(self.app.pumps) and self.inject_valve.count() > 0)
-        self.pump_connect.setEnabled(not self.app.pumps and not self.app.qmix.stalled)
+        common = ('A helper is already running; stop it or wait for completion.' if state['running'] else
+                  'Connect pumps first.' if not self.app.pumps else
+                  'The pump bus is unresponsive; resolve hardware state before reconnecting.' if self.app.qmix.stalled else '')
+        def selected_pump_reason(selector):
+            index = selector.currentIndex()
+            if not 0 <= index < len(self.cards):
+                return 'Select a connected pump first.'
+            observed = self.cards[index].syringe.state
+            return ('Waiting for verified pump status.' if not observed else
+                    'The selected pump reports a fault; reconnect to attempt fault recovery.' if observed.get('fault') else
+                    'Stop the selected pump before starting a helper.' if observed.get('pumping') else '')
+        availability(self.stir_start, common or selected_pump_reason(self.stir_pump) or ('Apply the selected pump’s energized/not energized valve mapping first.'
+                     if self.stir_pump.currentIndex() not in self.app.mapping else ''))
+        availability(self.inject_start, common or selected_pump_reason(self.inject_pump) or ('Connect and identify a supported TriContinent valve first.'
+                     if self.inject_valve.count() == 0 else ''))
+        availability(self.stir_stop, '' if state['running'] and state.get('kind') == 'stir' else 'No stirring cycle is running.')
+        availability(self.inject_stop, '' if state['running'] and state.get('kind') == 'inject' else 'No injection is running.')
+        availability(self.pump_connect, 'Pumps are already connected.' if self.app.pumps else
+                     'Connection is in progress.' if self.app.pump_connecting.is_set() else
+                     'The pump bus is unresponsive; resolve hardware state before reconnecting.' if self.app.qmix.stalled else '')
+        availability(self.pump_disconnect, 'No pumps are connected.' if not self.app.pumps else
+                     'Stop the active operation before disconnecting pumps.' if self.app.reserved else '')
+        availability(self.valve_connect, 'Valves are already connected.' if self.app.valves else '')
+        serial_reason = 'Connect valves first.' if not self.app.valves else 'Stop injection before changing the valve bus.' if ('serial', 0) in self.app.reserved else ''
+        availability(self.valve_scan, serial_reason)
+        availability(self.valve_disconnect, serial_reason)
         if not self.pending_poll and not self.app.qmix.stalled:
             self.pending_poll = True
             def action():
@@ -824,6 +966,7 @@ class MainWindow(QMainWindow):
     def update_pumps(self, states):
         for card, state in zip(self.cards, states):
             card.update_state(state)
+            card.refresh_availability()
 
     def closeEvent(self, event):
         self.timer.stop()

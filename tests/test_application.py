@@ -89,6 +89,53 @@ def test_stir_busy_deadline_stops_and_skips_later_transitions(app):
     assert app.pumps.read_fill_level(0) == pytest.approx(0.6)
 
 
+@pytest.mark.parametrize('begin,end,positions', [('Not energized', 'Energized', [1, 2]),
+                                                ('Energized', 'Energized', [2, 2])])
+def test_stir_waits_after_idle_and_selected_valve_states(app, monkeypatch, begin, end, positions):
+    transitions, waits = [], {}
+    original_valve, original_target = app.pumps.set_valve_position, app.pumps.set_fill_level
+    original_publish = app._publish
+    def valve(index, position):
+        transitions.append(('valve', position, time.monotonic()))
+        return original_valve(index, position)
+    def target(index, level, flow):
+        transitions.append(('target', level, time.monotonic()))
+        return original_target(index, level, flow)
+    def publish(**values):
+        if values.get('step', '').startswith('Waiting after'):
+            assert not app.pumps.read_status(0)
+            waits[values['step']] = time.monotonic()
+        return original_publish(**values)
+    monkeypatch.setattr(app.pumps, 'set_valve_position', valve)
+    monkeypatch.setattr(app.pumps, 'set_fill_level', target)
+    monkeypatch.setattr(app, '_publish', publish)
+    app.start('stir', 0, wait_empty=0.06, wait_full=0.08, valve_begin=begin, valve_end=end)
+    assert wait(app)['step'] == 'Completed'
+    assert [(kind, value) for kind, value, _ in transitions] == [('valve', positions[0]), ('target', 0), ('target', 1), ('valve', positions[1])]
+    assert transitions[2][2] - waits['Waiting after empty'] >= 0.055
+    assert transitions[3][2] - waits['Waiting after full'] >= 0.075
+
+
+@pytest.mark.parametrize('failure', ['cancel', 'fault', 'timeout'])
+def test_stir_wait_interruptions_skip_refill_and_end_valve(app, monkeypatch, failure):
+    targets = []
+    original = app.pumps.set_fill_level
+    monkeypatch.setattr(app.pumps, 'set_fill_level', lambda *args: (targets.append(args[1]), original(*args))[1])
+    app.start('stir', 0, wait_empty=1, deadline=0.4 if failure == 'timeout' else 5)
+    end = time.monotonic() + 2
+    while app.snapshot()['step'] != 'Waiting after empty' and time.monotonic() < end:
+        time.sleep(0.005)
+    assert app.snapshot()['step'] == 'Waiting after empty'
+    if failure == 'cancel':
+        app.stop_helper()
+    elif failure == 'fault':
+        app.pumps._pumps[0].fault = True
+    assert wait(app)['step'] == ('Cancelled' if failure == 'cancel' else 'Error')
+    assert targets == [0]
+    assert app.pumps.read_valve_position(0) == 2
+    assert not app.pumps.read_status(0)
+
+
 @pytest.mark.parametrize('address,before,after', [(a, b, c) for a, positions in
     [(2, ('input', 'output', 'bypass', 'extra')), (3, ('input', 'output', 'bypass'))]
     for b in positions for c in positions])

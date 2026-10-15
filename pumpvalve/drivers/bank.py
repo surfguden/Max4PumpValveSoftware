@@ -42,6 +42,19 @@ class CetoniPumpBank:
             pump = self._session.pump if index == 0 else self._session.qmixpump.Pump()
             if index:
                 pump.lookup_by_device_index(index)
+                previous = self._session.pump
+                self._session.pump = pump
+                try:
+                    if pump.is_in_fault_state():
+                        pump.clear_fault()
+                    # A persistent fault or invalid position sensing must still
+                    # fail connection. This never performs a reference move.
+                    self._session._require_position_sensing_initialized_before_enable()
+                    self._session._enable_pump()
+                except Exception as exc:
+                    raise RuntimeError(f'Pump {index + 1}: fault recovery/enable failed: {exc}') from exc
+                finally:
+                    self._session.pump = previous
                 pump.set_flow_unit(self._session.qmixpump.UnitPrefix.micro, self._session.qmixpump.VolumeUnit.litres, self._session.qmixpump.TimeUnit.per_minute)
                 pump.set_volume_unit(self._session.qmixpump.UnitPrefix.milli, self._session.qmixpump.VolumeUnit.litres)
             self._pumps.append(pump)

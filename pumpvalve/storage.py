@@ -24,8 +24,8 @@ def data_dir():
     return path
 
 
-def load():
-    path = data_dir() / 'settings.json'
+def load(path=None):
+    path = Path(path) if path is not None else data_dir() / 'settings.json'
     if not path.exists():
         return defaults()
     data = json.loads(path.read_text(encoding='utf-8'))
@@ -93,7 +93,7 @@ def validate_ui(ui):
         raise ValueError('Invalid helper settings')
     for field, limits in dict(stir_pump=(0, 3), inject_pump=(0, 3), stir_rate=(0.01, 1000000),
             refill_volume=(0, 1000000), inject_volume=(0.0001, 1000000),
-            inject_rate=(0, 1000000), deadline=(1, 3600)).items():
+            inject_rate=(0, 1000000), deadline=(1, 3600), wait_full=(0, 3600), wait_empty=(0, 3600)).items():
         if field in helpers and not bounded(helpers[field], *limits):
             raise ValueError(f'Invalid helper {field}')
     for field, choices in dict(speed=('Full speed', 'Defined flow rate'),
@@ -101,6 +101,9 @@ def validate_ui(ui):
             before=('input', 'output', 'bypass', 'extra', None),
             after=('input', 'output', 'bypass', 'extra', None)).items():
         if field in helpers and helpers[field] not in choices:
+            raise ValueError(f'Invalid helper {field}')
+    for field in ('valve_begin', 'valve_end'):
+        if field in helpers and helpers[field] not in ('Energized', 'Not energized'):
             raise ValueError(f'Invalid helper {field}')
     address = helpers.get('inject_valve')
     for field in ('stir_pump', 'inject_pump'):
@@ -118,9 +121,13 @@ def validate_ui(ui):
         raise ValueError('Invalid saved window size')
 
 
-def save(data):
+def save(data, path=None):
     validate(data)
-    path = data_dir() / 'settings.json'
-    tmp = path.with_suffix('.tmp')
-    tmp.write_text(json.dumps(data, indent=2, allow_nan=False), encoding='utf-8')
-    tmp.replace(path)
+    path = Path(path) if path is not None else data_dir() / 'settings.json'
+    import uuid
+    tmp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    try:
+        tmp.write_text(json.dumps(data, indent=2, allow_nan=False), encoding='utf-8')
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)

@@ -210,7 +210,7 @@ def test_gui_and_external_client_share_state_and_echo(service):
         succeed('settings.save', dict(valves=[dict(address=2, name='Agent renamed valve')]))
         until(lambda: any(edit.text() == 'Agent renamed valve' for card in window.valve_cards for edit in card.findChildren(QLineEdit)))
         succeed('pumps.disconnect')
-        until(lambda: len(window.cards) == 0)
+        until(lambda: all(not card.connected for card in window.cards))
     finally:
         window.close()
         qt.processEvents()
