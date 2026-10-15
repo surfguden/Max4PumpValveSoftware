@@ -2,7 +2,7 @@ from pathlib import Path
 import zipfile
 root = Path(__file__).resolve().parents[1]
 output = root / 'dist/Max4PumpValve-1.1.0-source.zip'
-entries = ['pumpvalve', 'vendor', 'tests', 'tools', 'docs', 'licenses', 'main.py', 'console_main.py', 'README.md',
+entries = ['pumpvalve', 'vendor', 'tests', 'tools', 'docs', 'licenses', 'settings', 'main.py', 'console_main.py', 'README.md',
            'PORTABLE_README.txt', 'Max4PumpValve.spec', 'build_portable.ps1',
            'requirements.txt', 'requirements-build.txt', '.gitignore', 'version_info.txt']
 with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:

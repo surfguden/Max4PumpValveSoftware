@@ -7,6 +7,37 @@ from pumpvalve.storage import load, save, defaults
 from pumpvalve.ui import MainWindow
 
 
+def test_shipped_luer_lok_profiles_import_without_hardware(tmp_path, monkeypatch):
+    from pathlib import Path
+    from pumpvalve.ui import SyringeDialog
+    monkeypatch.setenv('PUMPVALVE_DATA_DIR', str(tmp_path))
+    qt = QApplication.instance() or QApplication([])
+    commands = Commands()
+    path = Path(__file__).resolve().parents[1] / 'settings' / 'BD-Plastipak-Luer-Lok.json'
+    try:
+        response = commands.execute('settings.load', dict(path=str(path)))
+        assert response['ok'], response
+        profiles = commands.settings['syringes']
+        expected = {1: 4.70, 3: 8.57, 5: 11.98, 10: 14.43}
+        assert len(profiles) == len(expected)
+        for volume, diameter in expected.items():
+            name = f'BD Plastipak {volume} mL Luer-Lok'
+            dialog = SyringeDialog(profiles)
+            try:
+                dialog.profiles.setCurrentText(name)
+                dialog.apply()
+                assert dialog.profile is not None
+                assert dialog.profile.name == name
+                assert dialog.profile.inner_diameter_mm == diameter
+                assert dialog.profile.maximum_ml == volume
+            finally:
+                dialog.close()
+        assert commands.app.pumps is None and commands.app.valves is None
+    finally:
+        commands.close()
+        qt.processEvents()
+
+
 def test_hardware_defaults_and_simulation_rejected(tmp_path, monkeypatch):
     monkeypatch.setenv('PUMPVALVE_DATA_DIR', str(tmp_path))
     monkeypatch.setenv('LOCALAPPDATA', str(tmp_path/'local'))

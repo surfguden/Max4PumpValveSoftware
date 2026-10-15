@@ -78,6 +78,13 @@ call quarantines that bus; a stop is queued with priority, but remains unverifie
 until the call returns. Resolve hardware state before restarting the application.
 
 SETTINGS AND LOGS
+The included BD-Plastipak-Luer-Lok.json contains only the 1, 3, 5 and 10 mL
+BD Plastipak Luer-Lok profiles. Use File > Load settings to select this file.
+It contains no computer-specific connection paths or pump assignments. Loading
+settings replaces the saved settings; export existing settings first if needed,
+then check Connection settings and explicitly apply the mounted syringe profile.
+See SYRINGE_PROFILES.md for dimensions, provenance and stroke limitations.
+
 File > Save settings remembers connection paths, COM settings, valve names, syringe
 profiles and pump assignments, pump mode/volume/flow/level and valve mappings,
 helper selections/parameters/deadline, pump count, selected tab and window size.

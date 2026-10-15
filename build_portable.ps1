@@ -24,7 +24,9 @@ Check-Exit
 Check-Exit
 $Distribution = Join-Path $PSScriptRoot 'dist\Max4PumpValve-1.1.0'
 Copy-Item -LiteralPath 'PORTABLE_README.txt' -Destination $Distribution
+Copy-Item -LiteralPath 'settings\BD-Plastipak-Luer-Lok.json' -Destination $Distribution
 Copy-Item -LiteralPath 'docs\SDK_RUNTIME.md','docs\SOURCE_PROVENANCE.md','docs\VERIFICATION.md','docs\TERMINAL.md' -Destination $Distribution
+Copy-Item -LiteralPath 'docs\SYRINGE_PROFILES.md' -Destination $Distribution
 # Retain dependency licenses beside the portable application.
 & $BuildPython tools\collect_licenses.py $Distribution
 Check-Exit

@@ -1,0 +1,40 @@
+{
+  "syringes": {
+    "BD Plastipak 1 mL Luer-Lok": {
+      "name": "BD Plastipak 1 mL Luer-Lok",
+      "material": "Plastic",
+      "inner_diameter_mm": 4.7,
+      "max_piston_stroke_mm": 57.6388,
+      "minimum_ml": 0.0,
+      "maximum_ml": 1.0,
+      "max_pressure_bar": 1.0
+    },
+    "BD Plastipak 3 mL Luer-Lok": {
+      "name": "BD Plastipak 3 mL Luer-Lok",
+      "material": "Plastic",
+      "inner_diameter_mm": 8.57,
+      "max_piston_stroke_mm": 52.008,
+      "minimum_ml": 0.0,
+      "maximum_ml": 3.0,
+      "max_pressure_bar": 1.0
+    },
+    "BD Plastipak 5 mL Luer-Lok": {
+      "name": "BD Plastipak 5 mL Luer-Lok",
+      "material": "Plastic",
+      "inner_diameter_mm": 11.98,
+      "max_piston_stroke_mm": 55.0,
+      "minimum_ml": 0.0,
+      "maximum_ml": 5.0,
+      "max_pressure_bar": 1.0
+    },
+    "BD Plastipak 10 mL Luer-Lok": {
+      "name": "BD Plastipak 10 mL Luer-Lok",
+      "material": "Plastic",
+      "inner_diameter_mm": 14.43,
+      "max_piston_stroke_mm": 61.1474,
+      "minimum_ml": 0.0,
+      "maximum_ml": 10.0,
+      "max_pressure_bar": 1.0
+    }
+  }
+}
